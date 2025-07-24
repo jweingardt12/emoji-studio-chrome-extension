@@ -64,32 +64,38 @@ jobs:
         
         echo "Zip file created successfully"
     
+    - name: Create Release Notes
+      if: steps.check_release.outputs.exists == 'false'
+      run: |
+        cat > release-notes.md << 'EOF'
+        ## Emoji Studio Chrome Extension v${{ steps.version.outputs.version }}
+        
+        ### Installation
+        1. Download the `emoji-studio-extension-v${{ steps.version.outputs.version }}.zip` file
+        2. Extract the zip file to a folder
+        3. Open Chrome and go to `chrome://extensions/`
+        4. Enable "Developer mode"
+        5. Click "Load unpacked" and select the extracted folder
+        
+        ### What's New
+        - Single workspace support
+        - Drag and drop functionality
+        - Automatic environment detection (localhost/production)
+        
+        ### Features
+        - 🔐 Automatic Slack workspace authentication capture
+        - 🎯 One-click sync to Emoji Studio
+        - 🖼️ Right-click to create emoji from any image
+        - 📦 Drag and drop support in Create tab
+        - 🔄 Automatic environment detection
+        EOF
+    
     - name: Create Release
       if: steps.check_release.outputs.exists == 'false'
-      id: create_release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         gh release create "v${{ steps.version.outputs.version }}" \
           --title "Release v${{ steps.version.outputs.version }}" \
-          --notes "## Emoji Studio Chrome Extension v${{ steps.version.outputs.version }}
-          
-### Installation
-1. Download the \`emoji-studio-extension-v${{ steps.version.outputs.version }}.zip\` file
-2. Extract the zip file to a folder
-3. Open Chrome and go to \`chrome://extensions/\`
-4. Enable \"Developer mode\"
-5. Click \"Load unpacked\" and select the extracted folder
-
-### What's New
-- Single workspace support
-- Drag and drop functionality
-- Automatic environment detection (localhost/production)
-
-### Features
-- 🔐 Automatic Slack workspace authentication capture
-- 🎯 One-click sync to Emoji Studio
-- 🖼️ Right-click to create emoji from any image
-- 📦 Drag and drop support in Create tab
-- 🔄 Automatic environment detection" \
+          --notes-file release-notes.md \
           "./emoji-studio-extension-v${{ steps.version.outputs.version }}.zip"
