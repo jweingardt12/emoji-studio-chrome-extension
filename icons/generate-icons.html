@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate Extension Icons</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .icon-container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .icon-box {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    canvas {
+      border: 1px solid #ddd;
+      display: block;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Extension Icon Generator</h1>
+  <p>Right-click each canvas and save as PNG with the specified filename</p>
+  <div class="icon-container" id="iconContainer"></div>
+  
+  <script>
+    const sizes = [16, 32, 48, 128];
+    const container = document.getElementById('iconContainer');
+    
+    sizes.forEach(size => {
+      const box = document.createElement('div');
+      box.className = 'icon-box';
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      
+      const ctx = canvas.getContext('2d');
+      
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#611f69');
+      gradient.addColorStop(1, '#4a154b');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+      
+      // Emoji
+      ctx.font = `${size * 0.6}px Apple Color Emoji, Segoe UI Emoji`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🎨', size / 2, size / 2);
+      
+      const label = document.createElement('div');
+      label.textContent = `icon${size}.png`;
+      
+      box.appendChild(canvas);
+      box.appendChild(label);
+      container.appendChild(box);
+    });
+  </script>
+</body>
+</html>

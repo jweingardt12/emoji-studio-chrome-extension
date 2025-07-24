@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Generate Chrome Extension Icons</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 40px;
+      background: #f5f5f5;
+    }
+    .icon-preview {
+      display: inline-block;
+      margin: 20px;
+      text-align: center;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    canvas {
+      border: 1px solid #eee;
+      display: block;
+      margin: 0 auto 10px;
+    }
+    .download-all {
+      margin-top: 30px;
+      padding: 12px 24px;
+      background: #000;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .download-all:hover {
+      background: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>Emoji Studio Chrome Extension Icons</h1>
+  
+  <div id="icons-container"></div>
+  
+  <button class="download-all" onclick="downloadAll()">Download All Icons</button>
+
+  <script>
+    const sizes = [16, 32, 48, 128];
+    const container = document.getElementById('icons-container');
+    
+    function createIcon(size) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'icon-preview';
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      
+      // Calculate dimensions
+      const cornerRadius = size * 0.2;
+      const padding = size * 0.2;
+      const emojiSize = size - (padding * 2);
+      
+      // Function to draw rounded rectangle
+      function roundRect(x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+      }
+      
+      // Background with rounded corners
+      ctx.fillStyle = '#FACC15'; // Bright yellow
+      roundRect(0, 0, size, size, cornerRadius);
+      ctx.fill();
+      
+      // Add subtle gradient overlay
+      const gradient = ctx.createLinearGradient(0, 0, 0, size);
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0.1)');
+      ctx.fillStyle = gradient;
+      roundRect(0, 0, size, size, cornerRadius);
+      ctx.fill();
+      
+      // Draw emoji
+      ctx.font = `${emojiSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      // Add shadow for depth
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+      ctx.shadowBlur = size * 0.05;
+      ctx.shadowOffsetY = size * 0.02;
+      
+      ctx.fillText('🎨', size / 2, size / 2);
+      
+      // Add to DOM
+      wrapper.appendChild(canvas);
+      
+      const label = document.createElement('div');
+      label.textContent = `${size}x${size}`;
+      label.style.color = '#666';
+      label.style.fontSize = '14px';
+      wrapper.appendChild(label);
+      
+      container.appendChild(wrapper);
+      
+      return canvas;
+    }
+    
+    // Create all icons
+    const canvases = sizes.map(size => createIcon(size));
+    
+    function downloadAll() {
+      canvases.forEach((canvas, index) => {
+        canvas.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `icon${sizes[index]}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      });
+    }
+  </script>
+</body>
+</html>

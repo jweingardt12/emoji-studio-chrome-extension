@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Generate Chrome Extension Icons from Logo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 40px;
+      background: #f5f5f5;
+    }
+    .upload-section {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .icon-preview {
+      display: inline-block;
+      margin: 20px;
+      text-align: center;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    canvas {
+      border: 1px solid #eee;
+      display: block;
+      margin: 0 auto 10px;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+    }
+    .download-all {
+      margin-top: 30px;
+      padding: 12px 24px;
+      background: #000;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .download-all:hover {
+      background: #333;
+    }
+    #fileInput {
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Emoji Studio Chrome Extension Icons</h1>
+  
+  <div class="upload-section">
+    <h2>Upload Logo Image</h2>
+    <p>Select the Emoji Studio logo file to generate extension icons</p>
+    <input type="file" id="fileInput" accept="image/*">
+  </div>
+  
+  <div id="icons-container"></div>
+  
+  <button class="download-all" onclick="downloadAll()" style="display:none;">Download All Icons</button>
+
+  <script>
+    const sizes = [16, 32, 48, 128];
+    const container = document.getElementById('icons-container');
+    const fileInput = document.getElementById('fileInput');
+    const downloadButton = document.querySelector('.download-all');
+    let canvases = [];
+    
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            generateIcons(img);
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+    
+    // Auto-load logo.png if it exists
+    window.addEventListener('load', () => {
+      const img = new Image();
+      img.onload = () => {
+        generateIcons(img);
+      };
+      img.onerror = () => {
+        console.log('Logo.png not found, waiting for manual upload');
+      };
+      img.src = 'logo.png';
+    });
+    
+    function generateIcons(sourceImg) {
+      container.innerHTML = '';
+      canvases = [];
+      
+      sizes.forEach(size => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'icon-preview';
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        
+        // Enable image smoothing for better quality when scaling down
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        // Draw the logo scaled to fit
+        ctx.drawImage(sourceImg, 0, 0, size, size);
+        
+        // Add to DOM
+        wrapper.appendChild(canvas);
+        
+        const label = document.createElement('div');
+        label.textContent = `${size}x${size}`;
+        label.style.color = '#666';
+        label.style.fontSize = '14px';
+        wrapper.appendChild(label);
+        
+        container.appendChild(wrapper);
+        canvases.push(canvas);
+      });
+      
+      downloadButton.style.display = 'block';
+    }
+    
+    function downloadAll() {
+      canvases.forEach((canvas, index) => {
+        canvas.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `icon${sizes[index]}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
