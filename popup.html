@@ -47,20 +47,10 @@
       <div class="workspace-list" id="workspaceList">
         <div class="empty-state">
           <div class="empty-state-icon">📡</div>
-          <p class="empty-state-text">No workspaces detected yet</p>
+          <p class="empty-state-text">No workspace detected yet</p>
         </div>
       </div>
       
-      <div class="last-refreshed" id="lastRefreshed" style="display: none;">
-        <button class="refresh-button" id="refreshButton" title="Sync now">
-          <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-        </button>
-        <span id="lastRefreshedText">Never synced</span>
-      </div>
     </div>
 
     <div class="button-actions">
@@ -82,18 +72,25 @@
     </div>
 
     <!-- Create Tab Content -->
-    <div class="tab-content" id="createTab" style="display: none;">
+    <div class="tab-content" id="createTab">
       <div class="create-section">
+        <!-- Drag Zone Hint -->
+        <div class="drag-zone-hint" id="dragZoneHint">
+          <div class="drag-zone-hint-icon">📦</div>
+          <div class="drag-zone-hint-text">Drag & drop your files here</div>
+          <div class="drag-zone-hint-subtext">Images, GIFs, and videos supported</div>
+        </div>
+        
         <!-- File Input -->
         <div class="file-input-container">
-          <input type="file" id="fileInput" accept="image/*,.gif" style="display: none;">
+          <input type="file" id="fileInput" accept="image/*,video/*,.gif" style="display: none;">
           <button class="button button-secondary full-width" id="selectFileButton">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            Select Image
+            Or click to select file
           </button>
         </div>
 

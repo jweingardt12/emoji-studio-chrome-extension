@@ -6,7 +6,7 @@ This Chrome extension simplifies the process of connecting your Slack workspace 
 
 - 🔐 Automatic detection of Slack workspace authentication
 - 🎯 One-click data transfer to Emoji Studio
-- 🔄 Support for multiple workspaces
+- 🔄 Support for one workspace at a time
 - 🛡️ Secure local storage of credentials
 - ✨ Clean, intuitive interface
 
@@ -41,7 +41,7 @@ This Chrome extension simplifies the process of connecting your Slack workspace 
 
 4. **Send to Emoji Studio**:
    - Click the extension icon
-   - Review captured workspaces
+   - Review captured workspace
    - Click "Send to Emoji Studio"
    - The data will be transferred and Emoji Studio will open
 

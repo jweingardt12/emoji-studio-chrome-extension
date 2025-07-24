@@ -162,54 +162,6 @@ body {
   color: var(--foreground);
 }
 
-/* Last refreshed */
-.last-refreshed {
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-}
-
-.refresh-button {
-  background: none;
-  border: none;
-  padding: 4px;
-  margin: -4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.3s ease;
-  color: var(--muted-foreground);
-}
-
-.refresh-button:hover {
-  color: var(--foreground);
-}
-
-.refresh-button:hover .refresh-icon {
-  opacity: 1;
-  transform: rotate(180deg);
-}
-
-.refresh-button:active .refresh-icon {
-  transform: rotate(360deg);
-}
-
-.refresh-button.refreshing .refresh-icon {
-  animation: spin 1s linear infinite;
-}
-
-.refresh-icon {
-  width: 14px;
-  height: 14px;
-  opacity: 0.7;
-  transition: all 0.3s ease;
-}
 
 /* Workspace list */
 .workspace-list {
@@ -666,4 +618,66 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
+}
+
+/* Drag and drop styles */
+.drag-over {
+  position: relative;
+}
+
+.drag-over::before {
+  content: 'Drop your image, GIF, or video here';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 500;
+  z-index: 1000;
+  border-radius: var(--radius);
+  border: 2px dashed var(--brand);
+}
+
+@media (prefers-color-scheme: dark) {
+  .drag-over::before {
+    background: rgba(255, 255, 255, 0.9);
+    color: black;
+  }
+}
+
+/* Drag zone hint */
+.drag-zone-hint {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  text-align: center;
+  background: var(--secondary);
+  margin-bottom: 1rem;
+  transition: all 0.3s ease;
+}
+
+.drag-zone-hint:hover {
+  border-color: var(--muted-foreground);
+  background: var(--muted);
+}
+
+.drag-zone-hint-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.5;
+}
+
+.drag-zone-hint-text {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.drag-zone-hint-subtext {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  margin-top: 0.25rem;
 }

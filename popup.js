@@ -75,8 +75,25 @@ async function loadDataFromStorage() {
     console.log('[POPUP] Storage result:', result);
     
     if (result.slackData && typeof result.slackData === 'object') {
-      capturedData = result.slackData;
-      console.log('[POPUP] Loaded data for workspaces:', Object.keys(capturedData));
+      // Migration: If multiple workspaces exist, keep only the most recent one
+      const workspaceCount = Object.keys(result.slackData).length;
+      if (workspaceCount > 1) {
+        console.log('[POPUP] Multiple workspaces detected, keeping only the most recent');
+        const workspaces = Object.keys(result.slackData);
+        const mostRecentWorkspace = workspaces[workspaces.length - 1];
+        const mostRecentData = result.slackData[mostRecentWorkspace];
+        
+        capturedData = {};
+        capturedData[mostRecentWorkspace] = mostRecentData;
+        
+        // Update storage with single workspace
+        await chrome.storage.local.set({ slackData: capturedData });
+        console.log('[POPUP] Migration complete - kept workspace:', mostRecentWorkspace);
+      } else {
+        capturedData = result.slackData;
+      }
+      
+      console.log('[POPUP] Loaded data for workspace:', Object.keys(capturedData));
       return true;
     }
     return false;
@@ -156,7 +173,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Handle slackData changes
     if (namespace === 'local' && changes.slackData) {
       if (changes.slackData.newValue) {
-        capturedData = changes.slackData.newValue;
+        const newData = changes.slackData.newValue;
+        
+        // Migration: If multiple workspaces exist, keep only the most recent one
+        const workspaceCount = Object.keys(newData).length;
+        if (workspaceCount > 1) {
+          console.log('[POPUP] Multiple workspaces in storage change, migrating...');
+          const workspaces = Object.keys(newData);
+          const mostRecentWorkspace = workspaces[workspaces.length - 1];
+          const mostRecentData = newData[mostRecentWorkspace];
+          
+          capturedData = {};
+          capturedData[mostRecentWorkspace] = mostRecentData;
+          
+          // Update storage with single workspace
+          chrome.storage.local.set({ slackData: capturedData });
+        } else {
+          capturedData = newData;
+        }
+        
         console.log('[POPUP] Updated data from storage change');
         if (updateUIFunction) {
           updateUIFunction();
@@ -209,9 +244,6 @@ async function initializeSyncTab() {
   const workspaceList = document.getElementById('workspaceList');
   const sendButton = document.getElementById('sendToEmojiStudio');
   const clearButton = document.getElementById('clearData');
-  const lastRefreshedDiv = document.getElementById('lastRefreshed');
-  const lastRefreshedText = document.getElementById('lastRefreshedText');
-  const refreshButton = document.getElementById('refreshButton');
   
   // Load data again to be sure
   await loadDataFromStorage();
@@ -245,17 +277,15 @@ async function initializeSyncTab() {
     
     if (workspaceCount > 0) {
       statusIndicator.className = 'status-indicator status-connected';
-      statusText.textContent = `${workspaceCount} workspace${workspaceCount > 1 ? 's' : ''} connected`;
+      statusText.textContent = 'Workspace connected';
       
-      // Build workspace list HTML
+      // Build workspace list HTML - now only showing one workspace
       let html = '';
       for (const [workspace, data] of Object.entries(capturedData)) {
-        const hasEmojiCount = data.emojiCount !== null && data.emojiCount !== undefined;
         html += `
           <div class="workspace-item">
             <div class="workspace-info">
               <div class="workspace-name">${workspace}.slack.com</div>
-              ${hasEmojiCount ? `<div class="emoji-count">${data.emojiCount} custom emoji${data.emojiCount !== 1 ? 's' : ''}</div>` : '<div class="emoji-count loading">Loading emoji count...</div>'}
             </div>
           </div>
         `;
@@ -263,15 +293,9 @@ async function initializeSyncTab() {
       
       workspaceList.innerHTML = html;
       sendButton.disabled = false;
-      
-      // Show/update last refreshed time
-      if (lastSyncTime) {
-        lastRefreshedDiv.style.display = 'flex';
-        lastRefreshedText.textContent = formatTimeAgo(lastSyncTime);
-      }
     } else {
       statusIndicator.className = 'status-indicator status-disconnected';
-      statusText.textContent = 'No workspaces connected';
+      statusText.textContent = 'No workspace connected';
       workspaceList.innerHTML = `
         <div class="empty-state">
           <div class="empty-state-icon">📡</div>
@@ -318,65 +342,10 @@ async function initializeSyncTab() {
     }
   });
   
-  refreshButton.addEventListener('click', async () => {
-    refreshButton.disabled = true;
-    refreshButton.classList.add('refreshing');
-    
-    console.log('[POPUP] Refresh button clicked, updating emoji counts');
-    
-    if (Object.keys(capturedData).length === 0) {
-      alert('No connected workspaces to refresh. Please connect a Slack workspace first.');
-      refreshButton.classList.remove('refreshing');
-      refreshButton.disabled = false;
-      return;
-    }
-    
-    try {
-      // Send message to background script to refresh emoji counts
-      chrome.runtime.sendMessage({ type: 'REFRESH_EMOJI_COUNTS' }, (response) => {
-        console.log('[POPUP] Refresh response:', response);
-        
-        // Update the last sync time
-        const now = Date.now();
-        chrome.storage.local.set({ lastSyncTime: now });
-        
-        // Update UI to show new data
-        setTimeout(async () => {
-          await loadDataFromStorage();
-          await updateUI();
-          refreshButton.classList.remove('refreshing');
-          refreshButton.disabled = false;
-        }, 1000);
-      });
-    } catch (error) {
-      console.error('[POPUP] Failed to refresh emoji counts:', error);
-      refreshButton.classList.remove('refreshing');
-      refreshButton.disabled = false;
-    }
-  });
   
   // Initial UI update
   await updateUI();
   
-  // Update the refresh time every minute
-  setInterval(() => {
-    chrome.storage.local.get('lastSyncTime', ({ lastSyncTime }) => {
-      if (lastSyncTime && lastRefreshedDiv.style.display === 'flex') {
-        lastRefreshedText.textContent = formatTimeAgo(lastSyncTime);
-      }
-    });
-  }, 60000);
-  
-  // Try to update emoji counts periodically
-  let updateCount = 0;
-  const emojiCountInterval = setInterval(async () => {
-    await loadDataFromStorage();
-    await updateUI();
-    updateCount++;
-    if (updateCount >= 5) {
-      clearInterval(emojiCountInterval);
-    }
-  }, 3000);
 }
 
 // Simplified Create Tab - just send to Emoji Studio
@@ -390,6 +359,8 @@ function initializeCreateTab() {
   const successText = document.getElementById('successText');
   const errorMessage = document.getElementById('errorMessage');
   const errorText = document.getElementById('errorText');
+  const createTab = document.getElementById('createTab');
+  const dragZoneHint = document.getElementById('dragZoneHint');
   
   async function sendToEmojiStudio(imageUrl) {
     console.log('[POPUP] Redirecting to Emoji Studio create page');
@@ -436,6 +407,7 @@ function initializeCreateTab() {
       
       if (previewSection && previewImage) {
         console.log('[POPUP] Showing preview...');
+        if (dragZoneHint) dragZoneHint.style.display = 'none';
         previewSection.style.display = 'block';
         previewImage.src = imageUrl;
         if (previewLoading) previewLoading.style.display = 'none';
@@ -493,6 +465,7 @@ function initializeCreateTab() {
       if (!file) return;
       
       hideAllMessages();
+      if (dragZoneHint) dragZoneHint.style.display = 'none';
       if (previewSection) previewSection.style.display = 'block';
       if (previewLoading) previewLoading.style.display = 'flex';
       
@@ -500,11 +473,22 @@ function initializeCreateTab() {
       const reader = new FileReader();
       reader.onload = async (e) => {
         const dataUrl = e.target.result;
-        if (previewImage) previewImage.src = dataUrl;
-        if (previewLoading) previewLoading.style.display = 'none';
         
-        // Show success message and add send button
-        showSuccess('Image loaded! Click "Send to Emoji Studio" when ready.');
+        // Handle different file types
+        if (file.type.startsWith('video/')) {
+          if (previewImage) {
+            previewImage.style.display = 'none';
+          }
+          showSuccess('Video loaded! Click "Send to Emoji Studio" to convert to emoji.');
+        } else {
+          if (previewImage) {
+            previewImage.style.display = 'block';
+            previewImage.src = dataUrl;
+          }
+          showSuccess('Image loaded! Click "Send to Emoji Studio" when ready.');
+        }
+        
+        if (previewLoading) previewLoading.style.display = 'none';
         
         // Add a send button if it doesn't exist
         const sendButton = document.getElementById('sendToEmojiStudioButton');
@@ -527,6 +511,115 @@ function initializeCreateTab() {
         }
       };
       reader.readAsDataURL(file);
+    });
+  }
+  
+  // Add drag and drop functionality to Create tab
+  if (createTab) {
+    let dragCounter = 0; // Track drag enter/leave events
+    
+    createTab.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter++;
+      createTab.classList.add('drag-over');
+    });
+    
+    createTab.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter--;
+      if (dragCounter === 0) {
+        createTab.classList.remove('drag-over');
+      }
+    });
+    
+    createTab.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    
+    createTab.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter = 0;
+      createTab.classList.remove('drag-over');
+      
+      const files = Array.from(e.dataTransfer.files);
+      console.log('[POPUP] Files dropped:', files.length);
+      
+      // Filter for valid file types
+      const validFile = files.find(file => {
+        const isImage = file.type.startsWith('image/');
+        const isVideo = file.type.startsWith('video/');
+        const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
+        return isImage || isVideo || isGif;
+      });
+      
+      if (!validFile) {
+        showError('Please drop an image, GIF, or video file');
+        return;
+      }
+      
+      console.log('[POPUP] Processing dropped file:', validFile.name, validFile.type);
+      
+      hideAllMessages();
+      if (dragZoneHint) dragZoneHint.style.display = 'none';
+      if (previewSection) previewSection.style.display = 'block';
+      if (previewLoading) previewLoading.style.display = 'flex';
+      
+      // Convert to data URL and show preview
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const dataUrl = e.target.result;
+        
+        // For video files, show a placeholder or first frame
+        if (validFile.type.startsWith('video/')) {
+          if (previewImage) {
+            previewImage.style.display = 'none';
+          }
+          showSuccess('Video loaded! Click "Send to Emoji Studio" to convert to emoji.');
+        } else {
+          if (previewImage) {
+            previewImage.style.display = 'block';
+            previewImage.src = dataUrl;
+          }
+          showSuccess('Image loaded! Click "Send to Emoji Studio" when ready.');
+        }
+        
+        if (previewLoading) previewLoading.style.display = 'none';
+        
+        // Add a send button if it doesn't exist
+        let sendButton = document.getElementById('sendToEmojiStudioButton');
+        if (!sendButton && previewSection) {
+          sendButton = document.createElement('button');
+          sendButton.id = 'sendToEmojiStudioButton';
+          sendButton.className = 'button button-primary';
+          sendButton.style.marginTop = '16px';
+          sendButton.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+            Send to Emoji Studio
+          `;
+          previewSection.appendChild(sendButton);
+        }
+        
+        // Update or add click handler
+        if (sendButton) {
+          sendButton.onclick = async () => {
+            await sendToEmojiStudio(dataUrl);
+          };
+        }
+      };
+      
+      reader.onerror = () => {
+        if (previewLoading) previewLoading.style.display = 'none';
+        showError('Failed to read file. Please try again.');
+      };
+      
+      reader.readAsDataURL(validFile);
     });
   }
   

@@ -1,0 +1,156 @@
+name: Release Chrome Extension
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
+      - '!.github/workflows/release.yml'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper versioning
+      
+      - name: Get previous tag
+        id: previoustag
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+      
+      - name: Determine version bump
+        id: version
+        run: |
+          # Get commit messages since last tag
+          if [ "${{ steps.previoustag.outputs.tag }}" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s" --no-merges)
+          else
+            COMMITS=$(git log ${{ steps.previoustag.outputs.tag }}..HEAD --pretty=format:"%s" --no-merges)
+          fi
+          
+          # Default to patch version bump
+          BUMP_TYPE="patch"
+          
+          # Check commit messages for version bump indicators
+          if echo "$COMMITS" | grep -qiE "^(feat|feature)(\(.+\))?!:|BREAKING CHANGE:"; then
+            BUMP_TYPE="major"
+          elif echo "$COMMITS" | grep -qiE "^(feat|feature)(\(.+\))?:"; then
+            BUMP_TYPE="minor"
+          fi
+          
+          # Parse current version
+          CURRENT_VERSION="${{ steps.previoustag.outputs.tag }}"
+          CURRENT_VERSION="${CURRENT_VERSION#v}"  # Remove 'v' prefix
+          
+          # Split version into components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          # Increment version based on bump type
+          case $BUMP_TYPE in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "version_number=${MAJOR}.${MINOR}.${PATCH}" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+      
+      - name: Update manifest.json version
+        run: |
+          # Update version in manifest.json
+          sed -i 's/"version": "[^"]*"/"version": "${{ steps.version.outputs.version_number }}"/' manifest.json
+      
+      - name: Create extension package
+        run: |
+          # Create a directory for the extension files
+          mkdir -p emoji-studio-extension
+          
+          # Copy necessary files for the extension
+          cp manifest.json emoji-studio-extension/
+          cp background.js emoji-studio-extension/
+          cp content.js emoji-studio-extension/
+          cp inject.js emoji-studio-extension/
+          cp popup.html emoji-studio-extension/
+          cp popup.css emoji-studio-extension/
+          cp popup.js emoji-studio-extension/
+          cp logo.png emoji-studio-extension/
+          
+          # Copy icons directory
+          cp -r icons emoji-studio-extension/
+          
+          # Create zip file
+          cd emoji-studio-extension
+          zip -r ../emoji-studio-extension-${{ steps.version.outputs.version }}.zip .
+          cd ..
+      
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Generate release notes from commit messages
+          if [ "${{ steps.previoustag.outputs.tag }}" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            COMMITS=$(git log ${{ steps.previoustag.outputs.tag }}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Create release notes
+          {
+            echo "RELEASE_NOTES<<EOF"
+            echo "## What's Changed"
+            echo ""
+            echo "### Version bump: ${{ steps.version.outputs.bump_type }}"
+            echo ""
+            echo "$COMMITS"
+            echo ""
+            echo "**Full Changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/${{ steps.previoustag.outputs.tag }}...${{ steps.version.outputs.version }}"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          release_name: Emoji Studio Extension ${{ steps.version.outputs.version }}
+          body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+          draft: false
+          prerelease: false
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./emoji-studio-extension-${{ steps.version.outputs.version }}.zip
+          asset_name: emoji-studio-extension-${{ steps.version.outputs.version }}.zip
+          asset_content_type: application/zip
+      
+      - name: Commit version update
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add manifest.json
+          git diff --staged --quiet || git commit -m "chore: bump version to ${{ steps.version.outputs.version_number }} [skip ci]"
+          git push

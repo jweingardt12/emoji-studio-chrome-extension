@@ -156,7 +156,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           chrome.storage.local.get('slackData', (result) => {
             log('Storage check after send - has data:', !!result.slackData);
             if (result.slackData) {
-              log('Storage check - workspaces:', Object.keys(result.slackData));
+              log('Storage check - workspace:', Object.keys(result.slackData));
             }
           });
           

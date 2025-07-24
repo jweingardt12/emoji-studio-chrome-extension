@@ -125,68 +125,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-// Function to fetch emoji count from Slack
-function fetchEmojiCount(data, callback) {
-  if (!data.token || !data.workspace) {
-    log('Missing required data for emoji count fetch');
-    callback(null);
-    return;
-  }
-  
-  // Get a Slack tab to execute the fetch in the proper context
-  chrome.tabs.query({ url: `https://${data.workspace}.slack.com/*` }, (tabs) => {
-    if (!tabs || tabs.length === 0) {
-      log('No Slack tab found for workspace:', data.workspace);
-      callback(null);
-      return;
-    }
-    
-    const slackTab = tabs[0];
-    log('Found Slack tab for emoji count fetch:', slackTab.id);
-    
-    // Execute the fetch in the Slack tab context
-    chrome.scripting.executeScript({
-      target: { tabId: slackTab.id },
-      func: (token) => {
-        return new Promise((resolve) => {
-          const formData = new FormData();
-          formData.append('token', token);
-          
-          fetch('/api/emoji.adminList', {
-            method: 'POST',
-            body: formData,
-            credentials: 'include'
-          })
-          .then(response => response.json())
-          .then(result => {
-            if (result.ok && result.emoji) {
-              const customEmojis = result.emoji.filter(e => !e.is_alias);
-              resolve(customEmojis.length);
-            } else {
-              console.log('Invalid emoji response:', result);
-              resolve(null);
-            }
-          })
-          .catch(error => {
-            console.error('Error fetching emojis:', error);
-            resolve(null);
-          });
-        });
-      },
-      args: [data.token]
-    }, (results) => {
-      if (chrome.runtime.lastError) {
-        log('Script execution error:', chrome.runtime.lastError);
-        callback(null);
-        return;
-      }
-      
-      const count = results[0]?.result;
-      log('Emoji count result:', count);
-      callback(count);
-    });
-  });
-}
 
 // Function to sync data to Emoji Studio
 function syncToEmojiStudio() {
@@ -249,16 +187,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   if (request.type === 'SLACK_DATA_CAPTURED') {
     const workspace = request.data.workspace;
-    const dataWithCount = { ...request.data, emojiCount: null };
     
     log('Capturing data for workspace:', workspace);
     log('Token:', request.data.token?.substring(0, 20) + '...');
     log('Cookie:', request.data.cookie?.substring(0, 50) + '...');
     
-    // Store immediately
-    capturedData[workspace] = dataWithCount;
-    log('About to save to storage. capturedData keys:', Object.keys(capturedData));
-    log('Data for workspace:', workspace, dataWithCount);
+    // Replace all existing data with this single workspace
+    capturedData = {};
+    capturedData[workspace] = request.data;
+    log('Replaced all data with single workspace:', workspace);
     
     chrome.storage.local.set({ slackData: capturedData }, () => {
       if (chrome.runtime.lastError) {
@@ -280,21 +217,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Popup might not be open, that's fine
       });
     });
-    
-    // Try to fetch emoji count
-    if (request.data.token && request.data.workspace) {
-      fetchEmojiCount(request.data, (count) => {
-        if (count !== null) {
-          dataWithCount.emojiCount = count;
-          capturedData[workspace] = dataWithCount;
-          chrome.storage.local.set({ slackData: capturedData }, () => {
-            log('Updated emoji count in storage for workspace:', workspace, 'Count:', count);
-          });
-        } else {
-          log('Failed to fetch emoji count for workspace:', workspace);
-        }
-      });
-    }
     
     chrome.action.setBadgeText({ text: '✓' });
     chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
@@ -320,14 +242,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       log('Has slackData:', !!result.slackData);
       
       if (result.slackData && Object.keys(result.slackData).length > 0) {
-        capturedData = result.slackData;
+        // Migration: If multiple workspaces exist, keep only the most recent one
+        const workspaceCount = Object.keys(result.slackData).length;
+        if (workspaceCount > 1) {
+          log('Multiple workspaces detected, keeping only the most recent');
+          const workspaces = Object.keys(result.slackData);
+          const mostRecentWorkspace = workspaces[workspaces.length - 1];
+          const mostRecentData = result.slackData[mostRecentWorkspace];
+          
+          capturedData = {};
+          capturedData[mostRecentWorkspace] = mostRecentData;
+          
+          // Update storage with single workspace
+          chrome.storage.local.set({ slackData: capturedData });
+        } else {
+          capturedData = result.slackData;
+        }
+        
         log('Loaded data from storage:', Object.keys(capturedData));
         log('First workspace data sample:', Object.keys(capturedData)[0], capturedData[Object.keys(capturedData)[0]]);
       } else {
         log('No data in storage or empty data');
       }
       
-      log('Sending captured data with', Object.keys(capturedData).length, 'workspaces');
+      log('Sending captured data for workspace');
       sendResponse({ data: capturedData });
     });
     return true; // Keep channel open for async response
@@ -356,53 +294,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       message: request.message
     });
     sendResponse({ success: true });
-  } else if (request.type === 'REFRESH_EMOJI_COUNTS') {
-    log('Refresh emoji counts requested');
-    
-    // Update emoji counts for all workspaces
-    const workspaces = Object.entries(capturedData);
-    let completedCount = 0;
-    const results = [];
-    
-    if (workspaces.length === 0) {
-      sendResponse({ success: true, message: 'No workspaces to refresh' });
-      return;
-    }
-    
-    workspaces.forEach(([workspace, data]) => {
-      log('Refreshing emoji count for:', workspace);
-      fetchEmojiCount(data, (count) => {
-        if (count !== null) {
-          capturedData[workspace].emojiCount = count;
-          log('Updated emoji count for', workspace, ':', count);
-          results.push({ workspace, count, success: true });
-        } else {
-          results.push({ workspace, count: null, success: false });
-        }
-        
-        completedCount++;
-        if (completedCount === workspaces.length) {
-          // All requests completed, save to storage
-          chrome.storage.local.set({ slackData: capturedData }, () => {
-            log('Updated emoji counts saved to storage');
-            
-            // Notify popup if it's open
-            chrome.runtime.sendMessage({ type: 'DATA_UPDATED' }).catch(() => {
-              // Popup might not be open, that's fine
-            });
-            
-            sendResponse({ 
-              success: true, 
-              results: results,
-              totalWorkspaces: results.length,
-              successfulUpdates: results.filter(r => r.success).length
-            });
-          });
-        }
-      });
-    });
-    
-    return true; // Keep channel open for async response
   } else if (request.type === 'FETCH_IMAGE') {
     log('Fetching image for popup:', request.url);
     
@@ -638,10 +529,30 @@ chrome.runtime.onInstalled.addListener(() => {
   log('Extension installed/updated');
   chrome.storage.local.get('slackData', (result) => {
     if (result.slackData) {
-      capturedData = result.slackData;
+      // Migration: If multiple workspaces exist, keep only the most recent one
+      const workspaceCount = Object.keys(result.slackData).length;
+      if (workspaceCount > 1) {
+        log('Migrating from multiple workspaces to single workspace');
+        // Find the most recent workspace (assuming the last key is most recent)
+        const workspaces = Object.keys(result.slackData);
+        const mostRecentWorkspace = workspaces[workspaces.length - 1];
+        const mostRecentData = result.slackData[mostRecentWorkspace];
+        
+        // Keep only the most recent workspace
+        capturedData = {};
+        capturedData[mostRecentWorkspace] = mostRecentData;
+        
+        // Update storage with single workspace
+        chrome.storage.local.set({ slackData: capturedData }, () => {
+          log('Migration complete - kept workspace:', mostRecentWorkspace);
+        });
+      } else {
+        capturedData = result.slackData;
+      }
+      
       chrome.action.setBadgeText({ text: '✓' });
       chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
-      log('Restored data for workspaces:', Object.keys(capturedData));
+      log('Restored data for workspace:', Object.keys(capturedData));
     }
   });
 });
