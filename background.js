@@ -138,24 +138,28 @@ function syncToEmojiStudio() {
   
   try {
     // Find Emoji Studio tab or create one
-    const emojiStudioUrl = getEmojiStudioUrl('/dashboard?extension=true');
-    chrome.tabs.query({ url: `${emojiStudioUrl}/*` }, (tabs) => {
+    const emojiStudioUrl = getEmojiStudioUrl('/?extension=true');
+    const baseUrl = getEmojiStudioUrl('');
+    
+    chrome.tabs.query({ url: [`${baseUrl}/*`] }, (tabs) => {
       
+      log('Storing pendingExtensionData:', dataToSend);
       chrome.storage.local.set({ 
         pendingExtensionData: dataToSend,
         lastSyncTime: now
       }, () => {
+        log('Data stored in chrome.storage.local');
         if (tabs.length > 0) {
           // Use existing tab
           const tabId = tabs[0].id;
           chrome.tabs.update(tabId, { 
-            url: `${emojiStudioUrl}/dashboard?extension=true`,
+            url: emojiStudioUrl,
             active: true
           });
         } else {
           // Create new tab
           chrome.tabs.create({ 
-            url: `${emojiStudioUrl}/dashboard?extension=true` 
+            url: emojiStudioUrl 
           });
         }
         

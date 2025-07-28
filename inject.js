@@ -9,14 +9,19 @@
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);
   
+  console.log('[Emoji Studio Extension] URL params:', Object.fromEntries(urlParams.entries()));
+  console.log('[Emoji Studio Extension] Pathname:', window.location.pathname);
+  
   if (urlParams.get('extension') === 'true' && (window.location.pathname.includes('dashboard') || window.location.pathname.includes('settings'))) {
-    console.log('[Emoji Studio Extension] Checking for pending data in chrome.storage');
+    console.log('[Emoji Studio Extension] Extension sync detected! Checking for pending data in chrome.storage');
     
     // Check chrome.storage for pending data
     chrome.storage.local.get(['pendingExtensionData'], (result) => {
       console.log('[Emoji Studio Extension] Chrome storage result:', result);
+      console.log('[Emoji Studio Extension] Has pendingExtensionData:', !!result.pendingExtensionData);
+      
       if (result.pendingExtensionData) {
-        console.log('[Emoji Studio Extension] Found pending data:', result.pendingExtensionData);
+        console.log('[Emoji Studio Extension] Found pending data with keys:', Object.keys(result.pendingExtensionData));
         
         // Small delay to ensure the page is ready
         setTimeout(() => {
