@@ -155,11 +155,43 @@ function syncToEmojiStudio() {
           chrome.tabs.update(tabId, { 
             url: emojiStudioUrl,
             active: true
+          }, () => {
+            // Wait for the tab to reload, then send the data directly
+            chrome.tabs.onUpdated.addListener(function listener(updatedTabId, info) {
+              if (updatedTabId === tabId && info.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                
+                // Small delay to ensure content script is loaded
+                setTimeout(() => {
+                  log('Sending data directly to existing tab:', dataToSend);
+                  chrome.tabs.sendMessage(tabId, {
+                    type: 'EMOJI_STUDIO_DATA',
+                    data: dataToSend
+                  });
+                }, 1000);
+              }
+            });
           });
         } else {
           // Create new tab
           chrome.tabs.create({ 
             url: emojiStudioUrl 
+          }, (newTab) => {
+            // Wait for the tab to load, then send the data directly
+            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+              if (tabId === newTab.id && info.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                
+                // Small delay to ensure content script is loaded
+                setTimeout(() => {
+                  log('Sending data directly to new tab:', dataToSend);
+                  chrome.tabs.sendMessage(tabId, {
+                    type: 'EMOJI_STUDIO_DATA',
+                    data: dataToSend
+                  });
+                }, 1000);
+              }
+            });
           });
         }
         
@@ -275,10 +307,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep channel open for async response
   } else if (request.type === 'CLEAR_DATA') {
     capturedData = {};
-    chrome.storage.local.remove(['slackData', 'lastSyncTime']);
+    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData']);
     chrome.action.setBadgeText({ text: '' });
     lastNotificationTime = {}; // Reset notification tracking
     log('Data cleared from extension');
+    
+    // Notify all Emoji Studio tabs to clear their data
+    // Query for both development and production URLs
+    const devUrl = EMOJI_STUDIO_URLS.development;
+    const prodUrl = EMOJI_STUDIO_URLS.production;
+    
+    log('Querying for Emoji Studio tabs with URLs:', [devUrl + '/*', prodUrl + '/*']);
+    
+    chrome.tabs.query({ url: [devUrl + '/*', prodUrl + '/*'] }, (tabs) => {
+      log('Found Emoji Studio tabs:', tabs.length);
+      tabs.forEach(tab => {
+        log('Sending clear data message to tab:', tab.id, tab.url);
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'CLEAR_EMOJI_STUDIO_DATA'
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            log('Error sending clear data message to tab:', chrome.runtime.lastError.message);
+          } else {
+            log('Clear data message sent successfully to tab:', tab.id);
+          }
+        });
+      });
+    });
+    
     sendResponse({ success: true });
   } else if (request.type === 'SLACK_AUTH_FAILED') {
     log('Authentication failed for workspace:', request.workspace);

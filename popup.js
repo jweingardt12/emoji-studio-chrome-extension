@@ -243,7 +243,6 @@ async function initializeSyncTab() {
   const statusText = document.getElementById('statusText');
   const workspaceList = document.getElementById('workspaceList');
   const sendButton = document.getElementById('sendToEmojiStudio');
-  const clearButton = document.getElementById('clearData');
   
   // Load data again to be sure
   await loadDataFromStorage();
@@ -304,7 +303,6 @@ async function initializeSyncTab() {
         </div>
       `;
       sendButton.disabled = true;
-      lastRefreshedDiv.style.display = 'none';
     }
   }
   
@@ -325,23 +323,11 @@ async function initializeSyncTab() {
       
       chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
       
-      // Update last refreshed time immediately
-      lastRefreshedDiv.style.display = 'flex';
-      lastRefreshedText.textContent = formatTimeAgo(now);
+      // Successfully synced
     } catch (error) {
       console.error('Error syncing to Emoji Studio:', error);
     }
   });
-  
-  clearButton.addEventListener('click', async () => {
-    if (confirm('This will clear all stored Slack workspace data. Continue?')) {
-      capturedData = {};
-      await chrome.storage.local.remove(['slackData', 'lastSyncTime']);
-      chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
-      await updateUI();
-    }
-  });
-  
   
   // Initial UI update
   await updateUI();

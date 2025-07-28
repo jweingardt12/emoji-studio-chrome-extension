@@ -6,14 +6,29 @@
   console.log('[Emoji Studio Extension] Current pathname:', window.location.pathname);
   console.log('[Emoji Studio Extension] Current search:', window.location.search);
   
+  // Check if chrome.storage is available
+  if (typeof chrome === 'undefined' || !chrome.storage) {
+    console.error('[Emoji Studio Extension] Chrome storage API not available!');
+    return;
+  }
+  
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);
   
   console.log('[Emoji Studio Extension] URL params:', Object.fromEntries(urlParams.entries()));
   console.log('[Emoji Studio Extension] Pathname:', window.location.pathname);
+  console.log('[Emoji Studio Extension] Full URL:', window.location.href);
+  
+  // Add a visual indicator that the extension is loaded
+  console.log('%c[Emoji Studio Extension] Content script is active on this page', 'background: #22c55e; color: white; padding: 4px 8px; border-radius: 4px;');
+  
+  if (urlParams.get('extension') === 'true') {
+    console.log('[Emoji Studio Extension] Extension parameter found! Path includes settings?', window.location.pathname.includes('settings'));
+    console.log('[Emoji Studio Extension] Path includes dashboard?', window.location.pathname.includes('dashboard'));
+  }
   
   if (urlParams.get('extension') === 'true' && (window.location.pathname.includes('dashboard') || window.location.pathname.includes('settings'))) {
-    console.log('[Emoji Studio Extension] Extension sync detected! Checking for pending data in chrome.storage');
+    console.log('[Emoji Studio Extension] ✅ Extension sync detected! Checking for pending data in chrome.storage');
     
     // Check chrome.storage for pending data
     chrome.storage.local.get(['pendingExtensionData'], (result) => {
@@ -25,13 +40,8 @@
         
         // Small delay to ensure the page is ready
         setTimeout(() => {
-          // Send data to the page
-          window.postMessage({
-            type: 'EMOJI_STUDIO_DATA',
-            data: result.pendingExtensionData
-          }, '*');
-          
-          console.log('[Emoji Studio Extension] Data posted to window');
+          console.log('[Emoji Studio Extension] About to send data from chrome.storage');
+          sendDataToPage(result.pendingExtensionData);
         }, 500);
         
         // Clear the pending data
@@ -101,19 +111,35 @@
       }
   }
   
+  // Function to send data to the page
+  function sendDataToPage(data) {
+    console.log('[Emoji Studio Extension] Sending data to page:', {
+      workspace: data.workspace,
+      hasToken: !!data.token,
+      hasCookie: !!data.cookie
+    });
+    
+    window.postMessage({
+      type: 'EMOJI_STUDIO_DATA',
+      data: data
+    }, '*');
+    
+    console.log('[Emoji Studio Extension] ✅ Data sent to page via postMessage');
+  }
+  
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('[Emoji Studio Extension] Received message:', request.type, request.data);
+    console.log('[Emoji Studio Extension] Received chrome runtime message:', request.type);
+    console.log('[Emoji Studio Extension] Full message:', request);
     
     if (request.type === 'EMOJI_STUDIO_DATA') {
       // Forward the data to the page
-      console.log('[Emoji Studio Extension] Forwarding data to window:', request.data);
-      window.postMessage({
-        type: 'EMOJI_STUDIO_DATA',
-        data: request.data
-      }, '*');
+      console.log('[Emoji Studio Extension] Received direct data from background script');
+      sendDataToPage(request.data);
       
-      console.log('[Emoji Studio Extension] Data forwarded to page');
+      // Also clear any pending data from storage
+      chrome.storage.local.remove(['pendingExtensionData']);
+      
       sendResponse({ success: true });
     } else if (request.type === 'EMOJI_STUDIO_CREATE_EMOJI') {
       // Forward the emoji creation data to the page
@@ -127,10 +153,16 @@
       sendResponse({ success: true });
     } else if (request.type === 'CLEAR_EMOJI_STUDIO_DATA') {
       // Tell Emoji Studio to clear its data
+      console.log('[Emoji Studio Extension] ⚠️ CLEAR DATA REQUEST RECEIVED!');
       console.log('[Emoji Studio Extension] Forwarding clear data request to window');
-      window.postMessage({
+      
+      const message = {
         type: 'EMOJI_STUDIO_CLEAR_DATA_FROM_EXTENSION'
-      }, '*');
+      };
+      
+      window.postMessage(message, '*');
+      console.log('[Emoji Studio Extension] Clear data message posted to window:', message);
+      
       sendResponse({ success: true });
     }
     return true; // Keep message channel open
@@ -150,13 +182,12 @@
       // Check chrome.storage for pending data
       chrome.storage.local.get(['pendingExtensionData'], (result) => {
         if (result.pendingExtensionData) {
-          console.log('[Emoji Studio Extension] Sending pending data on request:', result.pendingExtensionData);
-          window.postMessage({
-            type: 'EMOJI_STUDIO_DATA',
-            data: result.pendingExtensionData
-          }, '*');
+          console.log('[Emoji Studio Extension] Found pending data on request');
+          sendDataToPage(result.pendingExtensionData);
           // Clear the pending data
           chrome.storage.local.remove(['pendingExtensionData']);
+        } else {
+          console.log('[Emoji Studio Extension] No pending data found on request');
         }
       });
     }

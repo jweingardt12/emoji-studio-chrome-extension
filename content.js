@@ -168,7 +168,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             log('Showing notification on emoji page');
             // Add a small delay to batch multiple captures
             setTimeout(() => {
-              showNotification('Custom Slack emoji data fetched successfully!');
+              showNotification('Emoji data captured');
             }, 500);
           } else {
             log('Not showing notification. Already shown:', hasShownNotification, 'Should show:', response?.showNotification, 'Is emoji page:', isEmojiPage);
@@ -203,59 +203,57 @@ function showNotification(message) {
   const notification = document.createElement('div');
   notification.className = 'emoji-studio-notification';
   notification.innerHTML = `
-    <div style="display: flex; align-items: center; gap: 12px;">
-      <div style="display: flex; align-items: center;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
-          <polyline points="20 6 9 17 4 12"></polyline>
-        </svg>
-        <span>${message}</span>
-      </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span style="font-size: 12px;">Emoji data captured</span>
       <button class="emoji-studio-sync-btn" style="
-        background: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.15);
         color: white;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-size: 13px;
-        font-weight: 500;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 450;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: all 0.15s ease;
         white-space: nowrap;
+        margin-left: 2px;
       ">
-        Sync to Emoji Studio
+        Sync
       </button>
     </div>
   `;
   notification.style.cssText = `
     position: fixed;
-    top: 20px;
-    right: 20px;
-    background: #22c55e;
+    top: 16px;
+    right: 16px;
+    background: #15803d;
     color: white;
-    padding: 12px 16px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(34, 197, 94, 0.25);
+    padding: 6px 10px;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(21, 128, 61, 0.15);
     z-index: 10000;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    animation: slideIn 0.3s ease-out;
+    font-size: 12px;
+    font-weight: 450;
+    animation: slideIn 0.15s ease-out;
   `;
   
   const style = document.createElement('style');
   style.textContent = `
     @keyframes slideIn {
-      from { transform: translateX(100%); opacity: 0; }
+      from { transform: translateX(15px); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
     @keyframes slideOut {
       from { transform: translateX(0); opacity: 1; }
-      to { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(15px); opacity: 0; }
     }
     .emoji-studio-sync-btn:hover {
-      background: rgba(255, 255, 255, 0.3) !important;
-      border-color: rgba(255, 255, 255, 0.4) !important;
-      transform: translateY(-1px);
+      background: rgba(255, 255, 255, 0.25) !important;
+      border-color: rgba(255, 255, 255, 0.35) !important;
     }
   `;
   document.head.appendChild(style);
@@ -268,14 +266,14 @@ function showNotification(message) {
     log('Sync button clicked, sending message to background');
     chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
     // Remove notification immediately when clicked
-    notification.style.animation = 'slideOut 0.3s ease-out forwards';
-    setTimeout(() => notification.remove(), 300);
+    notification.style.animation = 'slideOut 0.15s ease-out forwards';
+    setTimeout(() => notification.remove(), 200);
   });
   
   // Auto-hide after 5 seconds (increased from 2 seconds to give time to click)
   setTimeout(() => {
     if (notification.parentNode) {
-      notification.style.animation = 'slideOut 0.3s ease-out forwards';
+      notification.style.animation = 'slideOut 0.2s ease-out forwards';
       setTimeout(() => notification.remove(), 300);
     }
   }, 5000);
