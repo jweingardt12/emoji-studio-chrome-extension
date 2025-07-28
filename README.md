@@ -12,6 +12,16 @@ This Chrome extension simplifies the process of connecting your Slack workspace 
 
 ## Installation
 
+### Quick Install (Recommended)
+
+1. Download the latest version: [**Download Extension**](https://github.com/jweingardt12/emoji-studio-chrome-extension/releases/download/latest/emoji-studio-extension.zip)
+   - This link always points to the latest version
+2. Extract the ZIP file to a folder
+3. Open Chrome and navigate to `chrome://extensions/`
+4. Enable "Developer mode" in the top right
+5. Click "Load unpacked" and select the extracted folder
+6. The extension icon will appear in your toolbar
+
 ### Development Mode
 
 1. Clone this repository

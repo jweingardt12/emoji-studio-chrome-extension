@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,7 +15,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
     
@@ -36,8 +37,7 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
     
-    - name: Create zip file
-      if: steps.check_release.outputs.exists == 'false'
+    - name: Create zip files
       run: |
         # Create a clean directory for the extension
         mkdir -p dist
@@ -50,19 +50,26 @@ jobs:
         cp popup.html dist/
         cp popup.js dist/
         cp popup.css dist/
+        cp storage-debug.js dist/
         cp logo.png dist/
+        
+        # Copy README and CHANGELOG if they exist
+        [ -f "README.md" ] && cp README.md dist/
+        [ -f "CHANGELOG.md" ] && cp CHANGELOG.md dist/
         
         # Create icons directory if it exists
         if [ -d "icons" ]; then
           cp -r icons dist/
         fi
         
-        # Create the zip file
+        # Create the versioned zip file
         cd dist
         zip -r ../emoji-studio-extension-v${{ steps.version.outputs.version }}.zip *
+        # Also create a generic "latest" zip
+        zip -r ../emoji-studio-extension.zip *
         cd ..
         
-        echo "Zip file created successfully"
+        echo "Zip files created successfully"
     
     - name: Create Release Notes
       if: steps.check_release.outputs.exists == 'false'
@@ -90,7 +97,7 @@ jobs:
         - 🔄 Automatic environment detection
         EOF
     
-    - name: Create Release
+    - name: Create Versioned Release
       if: steps.check_release.outputs.exists == 'false'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,3 +106,51 @@ jobs:
           --title "Release v${{ steps.version.outputs.version }}" \
           --notes-file release-notes.md \
           "./emoji-studio-extension-v${{ steps.version.outputs.version }}.zip"
+    
+    - name: Delete existing latest release
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release delete latest --yes || true
+        git push origin --delete latest || true
+    
+    - name: Create Latest Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        cat > latest-release-notes.md << 'EOF'
+        ## Latest Chrome Extension Build
+        
+        This release always contains the latest version of the Emoji Studio Chrome Extension.
+        
+        **Current Version:** ${{ steps.version.outputs.version }}
+        
+        ### 🔗 Stable Download URL
+        You can always download the latest version using this URL:
+        ```
+        https://github.com/jweingardt12/emoji-studio-chrome-extension/releases/download/latest/emoji-studio-extension.zip
+        ```
+        
+        ### Installation
+        1. Download `emoji-studio-extension.zip` from this release
+        2. Extract the zip file to a folder
+        3. Open Chrome and go to `chrome://extensions/`
+        4. Enable "Developer mode"
+        5. Click "Load unpacked" and select the extracted folder
+        
+        ### Features
+        - 🔐 Automatic Slack workspace authentication capture
+        - 🎯 One-click sync to Emoji Studio
+        - 🖼️ Right-click to create emoji from any image
+        - 📦 Drag and drop support in Create tab
+        - 🔄 Automatic environment detection
+        
+        ### What's Changed
+        See the [CHANGELOG](https://github.com/jweingardt12/emoji-studio-chrome-extension/blob/master/CHANGELOG.md) for version history.
+        EOF
+        
+        gh release create "latest" \
+          --title "Latest Release" \
+          --notes-file latest-release-notes.md \
+          "./emoji-studio-extension.zip"
