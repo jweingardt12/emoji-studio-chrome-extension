@@ -9,7 +9,7 @@
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);
   
-  if (urlParams.get('extension') === 'true' && window.location.pathname.includes('dashboard')) {
+  if (urlParams.get('extension') === 'true' && (window.location.pathname.includes('dashboard') || window.location.pathname.includes('settings'))) {
     console.log('[Emoji Studio Extension] Checking for pending data in chrome.storage');
     
     // Check chrome.storage for pending data
@@ -140,6 +140,20 @@
       console.log('[Emoji Studio Extension] Clear data request from Emoji Studio');
       // Forward to background script to clear extension data
       chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
+    } else if (event.data.type === 'REQUEST_EXTENSION_DATA') {
+      console.log('[Emoji Studio Extension] Request for extension data received');
+      // Check chrome.storage for pending data
+      chrome.storage.local.get(['pendingExtensionData'], (result) => {
+        if (result.pendingExtensionData) {
+          console.log('[Emoji Studio Extension] Sending pending data on request:', result.pendingExtensionData);
+          window.postMessage({
+            type: 'EMOJI_STUDIO_DATA',
+            data: result.pendingExtensionData
+          }, '*');
+          // Clear the pending data
+          chrome.storage.local.remove(['pendingExtensionData']);
+        }
+      });
     }
   });
   
