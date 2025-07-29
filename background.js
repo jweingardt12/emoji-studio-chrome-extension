@@ -439,8 +439,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         // For HDR images, try to use the original URL if possible
         if (isLikelyHDR) {
-          console.log('Detected potential HDR image, preserving original URL');
-          
           // Create Emoji Studio URL with original image URL
           const emojiStudioUrl = getEmojiStudioUrl('/create?from=extension');
           const baseUrl = getEmojiStudioUrl('');
