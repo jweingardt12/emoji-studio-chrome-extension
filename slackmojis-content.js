@@ -177,17 +177,49 @@ function addButtonsToEmojis() {
   
 }
 
-// Run when the page loads
+// Function to set up mutation observer for dynamic content
+function setupObserver() {
+  // Create a MutationObserver to watch for new emojis being added
+  const observer = new MutationObserver((mutations) => {
+    // Check if any new nodes were added
+    let hasNewEmojis = false;
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === 1) { // Element node
+          // Check if the added node is an emoji or contains emojis
+          if (node.classList && node.classList.contains('emoji') || 
+              (node.querySelectorAll && node.querySelectorAll('li.emoji').length > 0)) {
+            hasNewEmojis = true;
+          }
+        }
+      });
+    });
+    
+    // If new emojis were added, add buttons to them
+    if (hasNewEmojis) {
+      setTimeout(addButtonsToEmojis, 100);
+    }
+  });
+  
+  // Start observing the entire body for changes
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
 
+// Run when the page loads
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     setTimeout(addButtonsToEmojis, 1000);
+    setupObserver();
   });
 } else {
   setTimeout(addButtonsToEmojis, 1000);
+  setupObserver();
 }
 
-// Also try after delays
+// Also try after delays for any emojis that might have been missed
 setTimeout(() => {
   addButtonsToEmojis();
 }, 3000);
