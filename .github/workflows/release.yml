@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
         cp popup.html dist/
         cp popup.js dist/
         cp popup.css dist/
-        cp storage-debug.js dist/
+        cp slackmojis-content.js dist/
         cp logo.png dist/
         
         # Copy README and CHANGELOG if they exist
@@ -147,7 +147,7 @@ jobs:
         - 🔄 Automatic environment detection
         
         ### What's Changed
-        See the [CHANGELOG](https://github.com/jweingardt12/emoji-studio-chrome-extension/blob/master/CHANGELOG.md) for version history.
+        See the [CHANGELOG](https://github.com/jweingardt12/emoji-studio-chrome-extension/blob/main/CHANGELOG.md) for version history.
         EOF
         
         gh release create "latest" \
