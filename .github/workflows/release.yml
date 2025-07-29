@@ -112,8 +112,12 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        # Delete the release if it exists
         gh release delete latest --yes || true
+        # Delete the remote tag if it exists
         git push origin --delete latest || true
+        # Delete the local tag if it exists
+        git tag -d latest || true
     
     - name: Create Latest Release
       env:
@@ -153,4 +157,5 @@ jobs:
         gh release create "latest" \
           --title "Latest Release" \
           --notes-file latest-release-notes.md \
+          --target "${{ github.sha }}" \
           "./emoji-studio-extension.zip"
