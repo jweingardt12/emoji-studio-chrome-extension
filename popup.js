@@ -211,15 +211,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return true;
   });
   
-  // Add disconnect function
-  window.disconnectWorkspace = async function() {
-    capturedData = {};
-    await chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData']);
-    chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
-    if (updateUIFunction) {
-      await updateUIFunction();
-    }
-  };
   
 });
 
@@ -270,7 +261,6 @@ async function initializeSyncTab() {
           <div class="workspace-item">
             <div class="workspace-info">
               <div class="workspace-name">${workspace}.slack.com</div>
-              <button class="disconnect-link" onclick="window.disconnectWorkspace()">Disconnect</button>
             </div>
           </div>
         `;
@@ -317,25 +307,7 @@ async function initializeSyncTab() {
   // Initial UI update
   await updateUI();
   
-  // Add disconnect button handler (if we add one to the UI)
-  const disconnectButton = document.getElementById('disconnectButton');
-  if (disconnectButton) {
-    disconnectButton.addEventListener('click', async () => {
-      capturedData = {};
-      await chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData']);
-      chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
-      await updateUI();
-    });
-  }
   
-  // Add refresh button handler
-  const refreshButton = document.getElementById('refreshButton');
-  if (refreshButton) {
-    refreshButton.addEventListener('click', async () => {
-      await loadDataFromStorage();
-      await updateUI();
-    });
-  }
 }
 
 // Simplified Create Tab - just send to Emoji Studio
