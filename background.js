@@ -430,8 +430,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
       try {
         
-        // Fetch the image directly in the background script
+        // Check if this might be an HDR image
+        const isLikelyHDR = request.url.toLowerCase().includes('hdr') || 
+                            request.url.toLowerCase().includes('heic') ||
+                            request.url.toLowerCase().includes('heif') ||
+                            request.url.toLowerCase().includes('_hdr') ||
+                            request.metadata?.isHDR;
         
+        // For HDR images, try to use the original URL if possible
+        if (isLikelyHDR) {
+          // Create Emoji Studio URL with original image URL
+          const emojiStudioUrl = getEmojiStudioUrl('/create?from=extension');
+          const baseUrl = getEmojiStudioUrl('');
+          
+          // Store data with original URL to preserve HDR
+          chrome.storage.local.set({ 
+            pendingExtensionData: {
+              source: 'slackmojis',
+              workspace: request.workspace,
+              workspaceData: workspaceData,
+              imageUrl: request.url,  // Original URL preserves HDR
+              isDirectUrl: true,
+              isHDR: true,
+              name: request.name || request.metadata?.name || 'emoji',
+              metadata: request.metadata || {}
+            }
+          }, () => {
+            // Open Emoji Studio
+            chrome.tabs.create({ url: emojiStudioUrl }, (tab) => {
+              sendResponse({ success: true });
+            });
+          });
+          return;
+        }
+        
+        // For non-HDR images, fetch and convert to data URL as before
         fetch(request.url)
           .then(response => {
             if (!response.ok) {

@@ -101,12 +101,6 @@
   
   // Function to send data to the page
   function sendDataToPage(data) {
-    console.log('[Extension] Sending data to page:', {
-      workspace: data.workspace,
-      hasToken: !!data.token,
-      hasCookie: !!data.cookie
-    });
-    
     window.postMessage({
       type: 'EMOJI_STUDIO_DATA',
       data: data

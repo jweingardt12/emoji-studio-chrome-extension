@@ -1,6 +1,6 @@
 
 // Function to create the "Add to Emoji Studio" button
-function createAddButton(emojiUrl, emojiName) {
+function createAddButton(emojiUrl, emojiName, metadata = {}) {
   const button = document.createElement('button');
   button.className = 'emoji-studio-add-btn';
   button.title = 'Add to Emoji Studio'; // Tooltip
@@ -71,7 +71,13 @@ function createAddButton(emojiUrl, emojiName) {
         type: 'ADD_EMOJI_FROM_SLACKMOJIS',
         url: emojiUrl,
         name: emojiName,
-        workspace: workspaceData.workspace
+        workspace: workspaceData.workspace,
+        metadata: {
+          name: emojiName,
+          source: 'slackmojis',
+          originalUrl: emojiUrl,
+          isHDR: metadata?.isHDR || false
+        }
       }, (response) => {
         if (chrome.runtime.lastError) {
           button.innerHTML = '✗';
@@ -120,6 +126,14 @@ function addButtonsToEmojis() {
     
     const emojiUrl = img.src;
     
+    // Check if this might be an HDR image
+    const isHDR = emojiUrl.toLowerCase().includes('hdr') ||
+                  emojiUrl.toLowerCase().includes('heic') ||
+                  emojiUrl.toLowerCase().includes('heif') ||
+                  emojiUrl.toLowerCase().includes('_hdr') ||
+                  img.alt?.toLowerCase().includes('hdr') ||
+                  img.title?.toLowerCase().includes('hdr');
+    
     // Try to get emoji name from various sources
     // 1. Check for a span with the emoji name (common pattern on Slackmojis)
     const nameSpan = container.querySelector('span.name');
@@ -132,7 +146,7 @@ function addButtonsToEmojis() {
     
     // 3. Try to extract from URL as last resort
     if (!emojiName && emojiUrl) {
-      const urlMatch = emojiUrl.match(/\/([^\/]+)\.(gif|png|jpg|jpeg|webp)(?:\?|$)/i);
+      const urlMatch = emojiUrl.match(/\/([^\/]+)\.(gif|png|jpg|jpeg|webp|heic|heif)(?:\?|$)/i);
       if (urlMatch) {
         emojiName = urlMatch[1];
       }
@@ -145,7 +159,7 @@ function addButtonsToEmojis() {
     if (!emojiUrl || emojiUrl.includes('data:')) return;
     
     // Create and add the button
-    const button = createAddButton(emojiUrl, emojiName);
+    const button = createAddButton(emojiUrl, emojiName, { isHDR });
     
     // Position the button in the top-right corner
     container.style.position = 'relative';
