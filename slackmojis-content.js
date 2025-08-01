@@ -1,21 +1,64 @@
 
-// Function to create the "Add to Emoji Studio" button
+// Wrap everything in an IIFE to avoid top-level return
+(function() {
+  // Check if extension context is valid
+  if (!chrome.runtime?.id) {
+    console.warn('Emoji Studio extension context not available');
+    // Don't set up any functionality if the extension context is invalid
+    return;
+  }
+
+  // Function to create the "Add to Emoji Studio" button
 function createAddButton(emojiUrl, emojiName, metadata = {}) {
   const button = document.createElement('button');
   button.className = 'emoji-studio-add-btn';
   button.title = 'Add to Emoji Studio'; // Tooltip
   
-  button.innerHTML = '+';
+  // Create logo image or fallback
+  let logoElement;
+  try {
+    if (chrome.runtime?.getURL) {
+      const logoImg = document.createElement('img');
+      logoImg.src = chrome.runtime.getURL('logo.png');
+      logoImg.style.cssText = `
+        width: 20px;
+        height: 20px;
+        margin-right: 2px;
+      `;
+      logoElement = logoImg;
+    } else {
+      throw new Error('Chrome runtime not available');
+    }
+  } catch (error) {
+    console.warn('Could not load extension logo:', error);
+    // Use a fallback emoji instead
+    const emojiSpan = document.createElement('span');
+    emojiSpan.textContent = '😀';
+    emojiSpan.style.cssText = `
+      font-size: 20px;
+      margin-right: 2px;
+    `;
+    logoElement = emojiSpan;
+  }
+  
+  // Create plus span
+  const plusSpan = document.createElement('span');
+  plusSpan.textContent = '+';
+  plusSpan.style.cssText = `
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+  `;
+  
+  button.appendChild(logoElement);
+  button.appendChild(plusSpan);
   
   button.style.cssText = `
     background: #1a1a1a;
     color: white;
-    border: none;
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
-    font-size: 20px;
-    font-weight: bold;
+    border: 2px solid white;
+    padding: 6px 10px;
+    border-radius: 6px;
     cursor: pointer;
     margin-top: 4px;
     transition: all 0.2s ease;
@@ -25,22 +68,49 @@ function createAddButton(emojiUrl, emojiName, metadata = {}) {
     justify-content: center;
     position: relative;
     opacity: 0;
+    gap: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   `;
+  
+  // Add hover effect
+  button.addEventListener('mouseenter', () => {
+    if (!button.disabled) {
+      button.style.background = '#2a2a2a';
+      button.style.transform = 'scale(1.05)';
+    }
+  });
+  
+  button.addEventListener('mouseleave', () => {
+    if (!button.disabled && plusSpan.textContent === '+') {
+      button.style.background = '#1a1a1a';
+      button.style.transform = 'scale(1)';
+    }
+  });
   
   button.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
     
     
+    // Check if extension context is still valid
+    if (!chrome.runtime?.id) {
+      console.warn('Extension context invalidated - please refresh the page');
+      plusSpan.textContent = '⟳';
+      button.style.background = '#f59e0b';
+      button.title = 'Please refresh the page';
+      return;
+    }
+    
     // Check if we have any saved Slack data
-    chrome.storage.local.get('slackData', async (result) => {
-      // Check for Chrome runtime errors
-      if (chrome.runtime.lastError) {
-        button.innerHTML = '✗';
-        button.style.background = '#dc2626';
-        button.title = 'Extension error';
-        setTimeout(() => {
-          button.innerHTML = '+';
+    try {
+      chrome.storage.local.get('slackData', async (result) => {
+        // Check for Chrome runtime errors
+        if (chrome.runtime.lastError) {
+          plusSpan.textContent = '✗';
+          button.style.background = '#dc2626';
+          button.title = 'Extension error';
+          setTimeout(() => {
+            plusSpan.textContent = '+';
           button.style.background = '#1a1a1a';
           button.title = 'Add to Emoji Studio';
         }, 2000);
@@ -48,11 +118,11 @@ function createAddButton(emojiUrl, emojiName, metadata = {}) {
       }
       
       if (!result.slackData || Object.keys(result.slackData).length === 0) {
-        button.innerHTML = '✗';
+        plusSpan.textContent = '✗';
         button.style.background = '#dc2626';
         button.title = 'No Slack workspace connected';
         setTimeout(() => {
-          button.innerHTML = '+';
+          plusSpan.textContent = '+';
           button.style.background = '#1a1a1a';
           button.title = 'Add to Emoji Studio';
         }, 2000);
@@ -62,48 +132,250 @@ function createAddButton(emojiUrl, emojiName, metadata = {}) {
       // Get the first workspace (for now)
       const workspaceData = Object.values(result.slackData)[0];
       
-      button.innerHTML = '...';
+      plusSpan.textContent = '...';
       button.title = 'Adding...';
       button.disabled = true;
       
-      // Send message to background script to add emoji
+      // Add a timeout safeguard
+      const timeoutId = setTimeout(() => {
+        console.error('Request timed out after 5 seconds');
+        plusSpan.textContent = '✗';
+        button.style.background = '#dc2626';
+        button.title = 'Request timed out';
+        setTimeout(() => {
+          plusSpan.textContent = '+';
+          button.style.background = '#1a1a1a';
+          button.title = 'Add to Emoji Studio';
+          button.disabled = false;
+        }, 2000);
+      }, 5000);
+      
+      // Send message to background script to add emoji to cart
       chrome.runtime.sendMessage({
-        type: 'ADD_EMOJI_FROM_SLACKMOJIS',
-        url: emojiUrl,
-        name: emojiName,
-        workspace: workspaceData.workspace,
-        metadata: {
+        type: 'ADD_TO_EMOJI_CART',
+        emoji: {
+          url: emojiUrl,
           name: emojiName,
+          workspace: workspaceData.workspace,
           source: 'slackmojis',
           originalUrl: emojiUrl,
-          isHDR: metadata?.isHDR || false
+          isHDR: metadata?.isHDR || false,
+          timestamp: Date.now()
         }
       }, (response) => {
+        clearTimeout(timeoutId); // Clear the timeout
+        
         if (chrome.runtime.lastError) {
-          button.innerHTML = '✗';
+          console.error('Chrome runtime error:', chrome.runtime.lastError);
+          plusSpan.textContent = '✗';
           button.style.background = '#dc2626';
           button.title = 'Failed to communicate with extension';
         } else if (response && response.success) {
-          button.innerHTML = '✓';
+          plusSpan.textContent = '✓';
           button.style.background = '#15803d';
-          button.title = 'Added to Emoji Studio!';
+          button.title = 'Added!';
+          createToast(); // Show toast notification
         } else {
-          button.innerHTML = '✗';
+          console.error('Failed to add emoji:', response);
+          plusSpan.textContent = '✗';
           button.style.background = '#dc2626';
           button.title = response?.error || 'Failed to add';
         }
         
         setTimeout(() => {
-          button.innerHTML = '+';
+          plusSpan.textContent = '+';
           button.style.background = '#1a1a1a';
           button.title = 'Add to Emoji Studio';
           button.disabled = false;
         }, 2000);
       });
     });
+    } catch (error) {
+      console.error('Error accessing Chrome storage:', error);
+      plusSpan.textContent = '✗';
+      button.style.background = '#dc2626';
+      button.title = 'Extension error - please refresh';
+      setTimeout(() => {
+        plusSpan.textContent = '+';
+        button.style.background = '#1a1a1a';
+        button.title = 'Add to Emoji Studio';
+      }, 2000);
+    }
   });
   
   return button;
+}
+
+// Create toast notification
+function createToast(message, type = 'success') {
+  // Remove any existing toast
+  const existingToast = document.querySelector('.emoji-studio-toast');
+  if (existingToast) {
+    existingToast.remove();
+  }
+  
+  const toast = document.createElement('div');
+  toast.className = 'emoji-studio-toast';
+  
+  // Try to get logo URL, fallback to emoji
+  let logoHtml;
+  try {
+    if (chrome.runtime?.getURL) {
+      logoHtml = `<img src="${chrome.runtime.getURL('logo.png')}" style="width: 24px; height: 24px;">`;
+    } else {
+      logoHtml = `<span style="font-size: 24px;">😀</span>`;
+    }
+  } catch (error) {
+    logoHtml = `<span style="font-size: 24px;">😀</span>`;
+  }
+  
+  toast.innerHTML = `
+    ${logoHtml}
+    <div style="flex: 1;">
+      <div style="font-weight: 600;">Emoji added!</div>
+      <div style="font-size: 0.875rem; opacity: 0.8;">Ready to send to Emoji Studio</div>
+    </div>
+    <button class="emoji-studio-toast-button">Open Extension</button>
+  `;
+  
+  toast.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #1a1a1a;
+    color: white;
+    padding: 16px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 10000;
+    animation: slideIn 0.3s ease-out;
+    border: 2px solid white;
+    max-width: 380px;
+  `;
+  
+  // Style the button
+  const button = toast.querySelector('.emoji-studio-toast-button');
+  button.style.cssText = `
+    background: white;
+    color: #1a1a1a;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  `;
+  
+  // Add button click handler
+  button.addEventListener('click', () => {
+    // Check if extension context is still valid
+    if (!chrome.runtime?.id) {
+      console.warn('Extension context invalidated');
+      return;
+    }
+    
+    try {
+      // Set flag to open create tab when extension is clicked
+      chrome.storage.local.set({ openCreateTab: true }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage error:', chrome.runtime.lastError);
+          return;
+        }
+        
+        // Chrome doesn't allow programmatically opening the extension popup
+        // So we'll highlight the extension icon instead
+        chrome.runtime.sendMessage({
+          type: 'HIGHLIGHT_EXTENSION_ICON'
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Message error:', chrome.runtime.lastError);
+          }
+        });
+        
+        // Update toast to show instruction
+        let updateLogoHtml;
+        try {
+          if (chrome.runtime?.getURL) {
+            updateLogoHtml = `<img src="${chrome.runtime.getURL('logo.png')}" style="width: 24px; height: 24px;">`;
+          } else {
+            updateLogoHtml = `<span style="font-size: 24px;">😀</span>`;
+          }
+        } catch (error) {
+          updateLogoHtml = `<span style="font-size: 24px;">😀</span>`;
+        }
+        
+        toast.innerHTML = `
+        ${updateLogoHtml}
+        <div style="flex: 1;">
+          <div style="font-weight: 600;">Click the extension icon</div>
+          <div style="font-size: 0.875rem; opacity: 0.8;">Opens to Create tab →</div>
+        </div>
+      `;
+      
+      // Remove the button since it was clicked
+      const toastButton = toast.querySelector('.emoji-studio-toast-button');
+      if (toastButton) toastButton.remove();
+      
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+          toast.style.animation = 'slideOut 0.3s ease-out';
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
+      });
+    } catch (error) {
+      console.error('Error in toast button click:', error);
+    }
+  });
+  
+  // Add hover effect
+  button.addEventListener('mouseenter', () => {
+    button.style.background = '#f0f0f0';
+  });
+  
+  button.addEventListener('mouseleave', () => {
+    button.style.background = 'white';
+  });
+  
+  // Add CSS animation (only once)
+  if (!document.querySelector('#emoji-studio-toast-styles')) {
+    const style = document.createElement('style');
+    style.id = 'emoji-studio-toast-styles';
+    style.textContent = `
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      @keyframes slideOut {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  document.body.appendChild(toast);
+  
+  // Auto-remove after 4 seconds
+  setTimeout(() => {
+    toast.style.animation = 'slideOut 0.3s ease-out';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
 }
 
 // Simple function to add buttons to emoji items
@@ -135,16 +407,32 @@ function addButtonsToEmojis() {
                   img.title?.toLowerCase().includes('hdr');
     
     // Try to get emoji name from various sources
-    // 1. Check for a span with the emoji name (common pattern on Slackmojis)
-    const nameSpan = container.querySelector('span.name');
-    let emojiName = nameSpan ? nameSpan.textContent.trim() : null;
+    // 1. Look for the emoji name in the format :emoji-name: within anchor tags
+    const anchorElement = container.querySelector('a');
+    let emojiName = null;
+    let anchorText = null;
     
-    // 2. Fall back to image attributes
+    if (anchorElement) {
+      anchorText = anchorElement.textContent.trim();
+      // Extract name from :emoji-name: format
+      const nameMatch = anchorText.match(/:([^:]+):/);
+      if (nameMatch) {
+        emojiName = nameMatch[1];
+      }
+    }
+    
+    // 2. Check for a span with the emoji name (fallback)
+    if (!emojiName) {
+      const nameSpan = container.querySelector('span.name');
+      emojiName = nameSpan ? nameSpan.textContent.trim() : null;
+    }
+    
+    // 3. Fall back to image attributes
     if (!emojiName) {
       emojiName = img.alt || img.title || '';
     }
     
-    // 3. Try to extract from URL as last resort
+    // 4. Try to extract from URL as last resort
     if (!emojiName && emojiUrl) {
       const urlMatch = emojiUrl.match(/\/([^\/]+)\.(gif|png|jpg|jpeg|webp|heic|heif)(?:\?|$)/i);
       if (urlMatch) {
@@ -152,8 +440,14 @@ function addButtonsToEmojis() {
       }
     }
     
-    // Clean up the emoji name
-    emojiName = emojiName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'emoji';
+    // Clean up the emoji name (but preserve the original formatting from slackmojis)
+    // Only clean if we had to fall back to alt/title/URL extraction
+    if (!anchorElement || !anchorText || !anchorText.match(/:([^:]+):/)) {
+      emojiName = emojiName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'emoji';
+    } else {
+      // For names from :emoji-name: format, just ensure it's not empty
+      emojiName = emojiName || 'emoji';
+    }
     
     // Skip if it's not a valid emoji image
     if (!emojiUrl || emojiUrl.includes('data:')) return;
@@ -237,4 +531,6 @@ if (document.readyState === 'loading') {
 setTimeout(() => {
   addButtonsToEmojis();
 }, 3000);
+
+})(); // End of IIFE
 

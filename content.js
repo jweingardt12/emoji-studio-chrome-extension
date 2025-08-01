@@ -39,13 +39,14 @@ function checkIfLoggedIn() {
 // Check authentication status on page load
 setTimeout(checkIfLoggedIn, 1000);
 
-function extractDataFromHeaders(headers) {
+function extractDataFromHeaders(headers, url) {
   const data = {
     workspace: extractWorkspace(),
     token: null,
     cookie: null,
     teamId: null,
-    xId: null
+    xId: null,
+    authHeaders: headers // Store the full headers object
   };
   
   // Try different token patterns
@@ -56,19 +57,38 @@ function extractDataFromHeaders(headers) {
     }
   }
   
-  // Look for token in cookie as well
+  // Store the full cookie header
   if (headers.cookie) {
-    // Split cookies and find the Slack 'd' cookie
+    data.cookie = headers.cookie;
+    
+    // Also try to extract token from cookies
     const cookies = headers.cookie.split(/;\s*/);
     for (const cookie of cookies) {
       const [name, value] = cookie.split('=');
       
       // The Slack 'd' cookie contains the authentication token
-      if (name === 'd' && value && value.startsWith('xox')) {
-        data.cookie = `d=${value}`;
-        // Also use this as token if we don't have one
-        if (!data.token) {
-          data.token = value;
+      if (name === 'd' && value) {
+        console.log('Found d cookie:', value.substring(0, 20) + '...');
+        // The d cookie value might be the token itself
+        if (value.startsWith('xox')) {
+          console.log('d cookie starts with xox');
+          if (!data.token) {
+            data.token = value;
+          }
+        } else {
+          // Try to decode if URL encoded
+          try {
+            const decodedValue = decodeURIComponent(value);
+            console.log('Decoded d cookie:', decodedValue.substring(0, 20) + '...');
+            if (decodedValue.startsWith('xox')) {
+              console.log('Decoded d cookie is a token!');
+              if (!data.token) {
+                data.token = decodedValue;
+              }
+            }
+          } catch (e) {
+            console.log('Failed to decode d cookie:', e);
+          }
         }
       }
       
@@ -76,10 +96,6 @@ function extractDataFromHeaders(headers) {
       if (name === 'team_id' && value) {
         data.teamId = value;
       }
-    }
-    
-    // If we still don't have a proper d cookie, log all cookies for debugging
-    if (!data.cookie || !data.cookie.includes('xox')) {
     }
   }
   
@@ -92,8 +108,157 @@ function extractDataFromHeaders(headers) {
     }
   });
   
+  // Also try to extract xId from request URL if not found in headers
+  if (!data.xId && url) {
+    const xIdMatch = url.match(/_x_id=([^&]+)/);
+    if (xIdMatch) {
+      data.xId = xIdMatch[1];
+    }
+  }
+  
   return data;
 }
+
+// Remove the script injection for now - it may be interfering
+// Focus on the original webRequest approach
+/*
+function injectTokenCapture() {
+  const script = document.createElement('script');
+  script.textContent = `
+    (function() {
+      console.log('[Emoji Studio] Installing token capture');
+      
+      // Store captured token globally
+      window.__slackToken = null;
+      
+      // Override fetch to capture tokens
+      const originalFetch = window.fetch;
+      window.fetch = function(...args) {
+        const [url, options = {}] = args;
+        
+        if (typeof url === 'string' && (url.includes('/api/emoji.') || url.includes('/api/client.'))) {
+          console.log('[Emoji Studio] Intercepted API call:', url);
+          
+          let token = null;
+          
+          // Extract token from form data
+          if (options.body instanceof FormData) {
+            token = options.body.get('token');
+            console.log('[Emoji Studio] Token from FormData:', token ? token.substring(0, 20) + '...' : 'none');
+          } else if (typeof options.body === 'string') {
+            try {
+              const params = new URLSearchParams(options.body);
+              token = params.get('token');
+              console.log('[Emoji Studio] Token from URLSearchParams:', token ? token.substring(0, 20) + '...' : 'none');
+            } catch (e) {
+              console.log('[Emoji Studio] Failed to parse as URLSearchParams');
+            }
+          }
+          
+          if (token && token.startsWith('xox')) {
+            window.__slackToken = token;
+            console.log('[Emoji Studio] Captured token:', token.substring(0, 20) + '...');
+            window.postMessage({
+              type: 'SLACK_TOKEN_CAPTURED',
+              token: token,
+              url: url
+            }, '*');
+          }
+        }
+        
+        return originalFetch.apply(this, args);
+      };
+      
+      // Also try to get token from boot data
+      if (window.boot_data && window.boot_data.api_token) {
+        console.log('[Emoji Studio] Found token in boot_data');
+        window.__slackToken = window.boot_data.api_token;
+        window.postMessage({
+          type: 'SLACK_TOKEN_CAPTURED',
+          token: window.boot_data.api_token,
+          url: 'boot_data'
+        }, '*');
+      }
+      
+      // Try to find token in various Slack globals
+      setTimeout(() => {
+        console.log('[Emoji Studio] Searching for token in globals...');
+        
+        // Check common Slack global variables
+        const possibleTokenLocations = [
+          'window.boot_data?.api_token',
+          'window.TS?.boot_data?.api_token',
+          'window.workspace_boot_data?.api_token',
+          'window.client_boot_data?.api_token',
+          'window.redux_initial_state?.session?.api_token',
+          'window.initial_data?.api_token'
+        ];
+        
+        for (const location of possibleTokenLocations) {
+          try {
+            const token = eval(location);
+            if (token && token.startsWith('xox')) {
+              console.log('[Emoji Studio] Found token at:', location);
+              window.__slackToken = token;
+              window.postMessage({
+                type: 'SLACK_TOKEN_CAPTURED',
+                token: token,
+                url: location
+              }, '*');
+              break;
+            }
+          } catch (e) {}
+        }
+      }, 2000);
+    })();
+  `;
+  
+  (document.head || document.documentElement).appendChild(script);
+  script.remove();
+}
+*/
+
+// Listen for token captures from the injected script
+/*
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  
+  if (event.data.type === 'SLACK_TOKEN_CAPTURED') {
+    console.log('Token captured from page:', event.data.token.substring(0, 15) + '...');
+    
+    const workspace = extractWorkspace();
+    if (!workspace) return;
+    
+    // Get current headers/cookie data
+    const currentHeaders = {
+      cookie: document.cookie,
+      workspace: workspace
+    };
+    
+    // Build complete auth data
+    const authData = {
+      workspace: workspace,
+      token: event.data.token,
+      cookie: currentHeaders.cookie,
+      teamId: null,
+      xId: null,
+      capturedFromAPI: true
+    };
+    
+    // Extract team ID from cookie if possible
+    const teamIdMatch = currentHeaders.cookie.match(/team_id=([^;]+)/);
+    if (teamIdMatch) {
+      authData.teamId = teamIdMatch[1];
+    }
+    
+    // Send complete auth data to background
+    chrome.runtime.sendMessage({
+      type: 'SLACK_DATA_CAPTURED',
+      data: authData
+    });
+  }
+});
+*/
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
@@ -104,17 +269,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       formToken: request.formToken
     });
     if (request.formToken) {
+      console.log('Stored pending request with form token:', request.formToken.substring(0, 15) + '...');
     }
   } else if (request.type === 'CAPTURE_HEADERS') {
     const pendingRequest = pendingRequests.get(request.requestId);
     if (pendingRequest) {
-      const data = extractDataFromHeaders(request.headers);
+      const data = extractDataFromHeaders(request.headers, request.url);
       
-      // Use form token if available and no token found in headers
+      // Store form token separately and use it if no other token found
       if (request.formToken) {
-        data.token = request.formToken;
+        console.log('Processing form token:', request.formToken.substring(0, 15) + '...');
+        // Try to decode the form token if it's URL encoded
+        let decodedFormToken = request.formToken;
+        try {
+          decodedFormToken = decodeURIComponent(request.formToken);
+        } catch (e) {
+          // Use original if decoding fails
+        }
+        
+        data.formToken = decodedFormToken;
+        if (!data.token) {
+          console.log('Using form token as main token');
+          data.token = decodedFormToken;
+        }
+      } else if (pendingRequest.formToken) {
+        // Check if form token was stored in pending request
+        console.log('Using form token from pending request:', pendingRequest.formToken.substring(0, 15) + '...');
+        data.formToken = pendingRequest.formToken;
+        if (!data.token) {
+          data.token = pendingRequest.formToken;
+        }
       }
       
+      
+      // Log what we captured for debugging
+      console.log('Captured Slack data:', {
+        workspace: data.workspace,
+        hasToken: !!data.token,
+        tokenType: data.token ? data.token.substring(0, 4) : 'none',
+        hasCookie: !!data.cookie,
+        hasFormToken: !!data.formToken,
+        formTokenType: data.formToken ? data.formToken.substring(0, 4) : 'none'
+      });
+      
+      // Always prefer formToken over cookie token
+      if (data.formToken && data.formToken.startsWith('xoxc')) {
+        console.log('Using formToken as primary token');
+        data.token = data.formToken;
+      }
       
       if (data.token && data.workspace) {
         // Check if we've already captured data for this workspace recently

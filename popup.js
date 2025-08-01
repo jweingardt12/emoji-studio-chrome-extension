@@ -2,55 +2,15 @@
 
 // Environment configuration
 const EMOJI_STUDIO_URLS = {
-  development: 'http://localhost:3001',
+  development: 'http://localhost:3002',
   production: 'https://app.emojistudio.xyz'
 };
 
 // Force production mode - set this to true to always use production URLs
-const FORCE_PRODUCTION = true; // Always use production for Chrome Store
+const FORCE_PRODUCTION = true; // Set to true for production release
 
-// Detect environment - check if localhost is accessible
-let currentEnvironment = 'production'; // default to production
-
-function detectEnvironment() {
-  return new Promise((resolve) => {
-    // If force production is enabled, skip detection
-    if (FORCE_PRODUCTION) {
-      currentEnvironment = 'production';
-      resolve('production');
-      return;
-    }
-    
-    // Try to fetch from localhost to detect if we're in development
-    // Use a more specific endpoint that would only exist in Emoji Studio
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
-    
-    fetch('http://localhost:3001/api/slack/workspaces', { 
-      method: 'GET',
-      signal: controller.signal,
-      headers: {
-        'Accept': 'application/json'
-      }
-    })
-      .then(response => {
-        clearTimeout(timeoutId);
-        // Only consider it development if we get a valid response
-        if (response.ok || response.status === 401 || response.status === 404) {
-          currentEnvironment = 'development';
-          resolve('development');
-        } else {
-          currentEnvironment = 'production';
-          resolve('production');
-        }
-      })
-      .catch(() => {
-        clearTimeout(timeoutId);
-        currentEnvironment = 'production';
-        resolve('production');
-      });
-  });
-}
+// Set environment based on FORCE_PRODUCTION flag
+let currentEnvironment = FORCE_PRODUCTION ? 'production' : 'development';
 
 function getEmojiStudioUrl(path = '') {
   const baseUrl = EMOJI_STUDIO_URLS[currentEnvironment];
@@ -310,275 +270,799 @@ async function initializeSyncTab() {
   
 }
 
-// Simplified Create Tab - just send to Emoji Studio
+// Create Tab functionality
 function initializeCreateTab() {
-  const fileInput = document.getElementById('fileInput');
-  const selectFileButton = document.getElementById('selectFileButton');
-  const previewSection = document.getElementById('previewSection');
-  const previewImage = document.getElementById('previewImage');
-  const previewLoading = document.getElementById('previewLoading');
-  const successMessage = document.getElementById('successMessage');
-  const successText = document.getElementById('successText');
-  const errorMessage = document.getElementById('errorMessage');
-  const errorText = document.getElementById('errorText');
-  const createTab = document.getElementById('createTab');
-  const dragZoneHint = document.getElementById('dragZoneHint');
+  const emojiItems = document.getElementById('emojiItems');
+  const createActions = document.getElementById('createActions');
+  const emojiSummary = document.getElementById('emojiSummary');
+  const clearAllButton = document.getElementById('clearAllButton');
+  const createSuccessMessage = document.getElementById('createSuccessMessage');
+  const createSuccessText = document.getElementById('createSuccessText');
+  const createErrorMessage = document.getElementById('createErrorMessage');
+  const createErrorText = document.getElementById('createErrorText');
   
-  async function sendToEmojiStudio(imageUrl) {
-    
-    // Detect environment first
-    await detectEnvironment();
-    
-    // Store the image data for Emoji Studio to pick up
-    await chrome.storage.local.set({
-      pendingEmojiStudioCreate: {
-        imageUrl: imageUrl,
-        timestamp: Date.now()
+  // Load and display emojis
+  async function loadEmojis() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_CART_DATA' });
+      const cart = response.cart || [];
+      
+      // Update emoji display
+      if (cart.length === 0) {
+        emojiItems.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">✨</div>
+            <p class="empty-state-text">No emojis added yet</p>
+            <p class="empty-state-subtext">Drop images/videos here or add from slackmojis.com</p>
+          </div>
+        `;
+        createActions.style.display = 'none';
+        clearAllButton.style.display = 'none';
+      } else {
+        // Show emoji items
+        emojiItems.innerHTML = cart.map((emoji, index) => `
+          <div class="emoji-item" data-index="${index}">
+            <img src="${emoji.url}" alt="${emoji.name}" class="emoji-item-image">
+            <div class="emoji-item-info">
+              <div class="emoji-item-name">
+                <input type="text" class="emoji-item-name-input" value="${emoji.name}" 
+                       data-original-name="${emoji.name}" data-workspace="${emoji.workspace}"
+                       pattern="[a-z0-9_\\-]+" 
+                       title="Use lowercase letters, numbers, underscores, and dashes only">
+              </div>
+              <div class="emoji-item-source">From ${emoji.source}</div>
+            </div>
+            <button class="emoji-item-remove" data-name="${emoji.name}" data-workspace="${emoji.workspace}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        `).join('');
+        
+        createActions.style.display = 'block';
+        clearAllButton.style.display = 'block';
+        emojiSummary.textContent = `${cart.length} emoji${cart.length > 1 ? 's' : ''} selected`;
+        
+        // Attach event listener to Send to Slack button after it's visible
+        attachSendToSlackListener();
+        
+        // Add name input listeners
+        document.querySelectorAll('.emoji-item-name-input').forEach(input => {
+          input.addEventListener('change', async (e) => {
+            const newName = e.target.value.trim();
+            const originalName = input.getAttribute('data-original-name');
+            const workspace = input.getAttribute('data-workspace');
+            
+            // Validate name
+            if (!newName || !/^[a-z0-9_-]+$/.test(newName)) {
+              input.value = originalName; // Reset to original
+              return;
+            }
+            
+            // Update the emoji name in cart
+            const response = await chrome.runtime.sendMessage({ type: 'GET_CART_DATA' });
+            const cart = response.cart || [];
+            const emojiIndex = cart.findIndex(e => e.name === originalName && e.workspace === workspace);
+            
+            if (emojiIndex !== -1) {
+              cart[emojiIndex].name = newName;
+              cart[emojiIndex].originalName = cart[emojiIndex].originalName || originalName;
+              
+              // Save updated cart
+              await chrome.storage.local.set({ emojiCart: cart });
+              
+              // Update the data attributes
+              input.setAttribute('data-original-name', newName);
+              const removeBtn = input.closest('.emoji-item').querySelector('.emoji-item-remove');
+              if (removeBtn) {
+                removeBtn.setAttribute('data-name', newName);
+              }
+            }
+          });
+          
+          // Add Enter key support
+          input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+              e.target.blur(); // Trigger change event
+            }
+          });
+        });
+        
+        // Add remove button listeners
+        document.querySelectorAll('.emoji-item-remove').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const name = btn.getAttribute('data-name');
+            const workspace = btn.getAttribute('data-workspace');
+            
+            try {
+              await chrome.runtime.sendMessage({
+                type: 'REMOVE_FROM_CART',
+                emojiName: name,
+                workspace: workspace
+              });
+              loadEmojis(); // Reload emojis
+            } catch (error) {
+              console.error('Failed to remove emoji:', error);
+            }
+          });
+        });
       }
-    });
-    
-    // Open Emoji Studio create page
-    const emojiStudioUrl = getEmojiStudioUrl('/create?from=extension');
-    await chrome.tabs.create({ url: emojiStudioUrl });
-    
-    // Close the popup by clearing the pending data that opened it
-    chrome.storage.local.remove(['pendingEmojiCreate', 'openCreateTab']);
-    chrome.action.setBadgeText({ text: '' });
-    
-    // Close the popup window
-    window.close();
+    } catch (error) {
+      console.error('Failed to load emojis:', error);
+    }
   }
   
-  // Check for pending emoji from context menu
-  chrome.storage.local.get('pendingEmojiCreate', async (result) => {
+  // Clear all emojis
+  if (clearAllButton) {
+    clearAllButton.addEventListener('click', async () => {
+      if (confirm('Clear all emojis?')) {
+        try {
+          await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
+          loadEmojis();
+        } catch (error) {
+          console.error('Failed to clear emojis:', error);
+        }
+      }
+    });
+  }
+  
+  // Function to attach event listener to Send to Slack button
+  function attachSendToSlackListener() {
+    const sendToSlackButton = document.getElementById('sendToSlack');
     
-    if (result.pendingEmojiCreate) {
-      const { imageUrl } = result.pendingEmojiCreate;
-      
-      // Show preview
-      if (previewSection && previewImage) {
-        if (dragZoneHint) dragZoneHint.style.display = 'none';
-        previewSection.style.display = 'block';
-        previewImage.src = imageUrl;
-        if (previewLoading) previewLoading.style.display = 'none';
-      } else {
-      }
-      
-      // Show a button to send to Emoji Studio instead of doing it automatically
-      if (typeof showSuccess === 'function') {
-        showSuccess('Image loaded! Click "Send to Emoji Studio" when ready.');
-      } else {
-      }
-      
-      // Add a send button if it doesn't exist
-      const sendButton = document.getElementById('sendToEmojiStudioButton');
-      
-      if (!sendButton && previewSection) {
-        const button = document.createElement('button');
-        button.id = 'sendToEmojiStudioButton';
-        button.className = 'button button-primary';
-        button.style.marginTop = '16px';
-        button.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-            <polyline points="12 5 19 12 12 19"></polyline>
-          </svg>
-          Send to Emoji Studio
-        `;
-        button.onclick = async () => {
-          await sendToEmojiStudio(imageUrl);
-          chrome.storage.local.remove('pendingEmojiCreate');
-          // Clear the badge
-          chrome.action.setBadgeText({ text: '' });
-        };
-        previewSection.appendChild(button);
-      } else if (!previewSection) {
-      }
+    // Prevent duplicate listeners
+    if (sendToSlackButton && sendToSlackButton.hasAttribute('data-listener-attached')) {
+      return; // Already attached
+    }
+    
+    // Send to Slack - upload directly
+    if (sendToSlackButton) {
+      sendToSlackButton.setAttribute('data-listener-attached', 'true');
+      sendToSlackButton.addEventListener('click', async () => {
+        try {
+          // Hide messages
+          createSuccessMessage.style.display = 'none';
+          createErrorMessage.style.display = 'none';
+          
+          // Get emoji data
+          const response = await chrome.runtime.sendMessage({ type: 'GET_CART_DATA' });
+          const cart = response.cart || [];
+          
+          if (cart.length === 0) {
+            createErrorText.textContent = 'No emojis to send';
+            createErrorMessage.style.display = 'flex';
+            return;
+          }
+          
+          // Get workspace data
+          const workspaceData = Object.values(capturedData)[0];
+          if (!workspaceData) {
+            createErrorText.textContent = 'No Slack workspace connected';
+            createErrorMessage.style.display = 'flex';
+            return;
+          }
+          
+          // Upload directly to Slack
+          await uploadEmojisToSlackDirectly(cart, workspaceData);
+          
+        } catch (error) {
+          console.error('Failed to send to Slack:', error);
+          createErrorText.textContent = 'Failed to send emojis';
+          createErrorMessage.style.display = 'flex';
+        }
+      });
+    }
+  }
+  
+  
+  // Initial load
+  loadEmojis();
+  
+  
+  // Listen for emoji updates
+  chrome.runtime.onMessage.addListener((request) => {
+    if (request.type === 'CART_UPDATED') {
+      loadEmojis();
     }
   });
   
-  if (selectFileButton) {
-    selectFileButton.addEventListener('click', () => {
-      fileInput.click();
-    });
-  }
-  
+  // Add file input handler
+  const fileInput = document.getElementById('fileInput');
   if (fileInput) {
-    fileInput.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      hideAllMessages();
-      if (dragZoneHint) dragZoneHint.style.display = 'none';
-      if (previewSection) previewSection.style.display = 'block';
-      if (previewLoading) previewLoading.style.display = 'flex';
-      
-      // Convert to data URL and show preview
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const dataUrl = e.target.result;
-        
-        // Handle different file types
-        if (file.type.startsWith('video/')) {
-          if (previewImage) {
-            previewImage.style.display = 'none';
-          }
-          showSuccess('Video loaded! Click "Send to Emoji Studio" to convert to emoji.');
-        } else {
-          if (previewImage) {
-            previewImage.style.display = 'block';
-            previewImage.src = dataUrl;
-          }
-          showSuccess('Image loaded! Click "Send to Emoji Studio" when ready.');
-        }
-        
-        if (previewLoading) previewLoading.style.display = 'none';
-        
-        // Add a send button if it doesn't exist
-        const sendButton = document.getElementById('sendToEmojiStudioButton');
-        if (!sendButton && previewSection) {
-          const button = document.createElement('button');
-          button.id = 'sendToEmojiStudioButton';
-          button.className = 'button button-primary';
-          button.style.marginTop = '16px';
-          button.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-            Send to Emoji Studio
-          `;
-          button.onclick = async () => {
-            await sendToEmojiStudio(dataUrl);
-          };
-          previewSection.appendChild(button);
-        }
-      };
-      reader.readAsDataURL(file);
+    fileInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+      // Reset the input so the same file can be selected again
+      e.target.value = '';
     });
   }
   
-  // Add drag and drop functionality to Create tab
-  if (createTab) {
-    let dragCounter = 0; // Track drag enter/leave events
+  // Add drag and drop functionality
+  let dragCounter = 0;
+  
+  // Prevent default drag behaviors
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    document.addEventListener(eventName, preventDefaults, false);
+    emojiItems.addEventListener(eventName, preventDefaults, false);
+  });
+  
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
+  // Highlight drop area when item is dragged over it
+  ['dragenter', 'dragover'].forEach(eventName => {
+    emojiItems.addEventListener(eventName, highlight, false);
+  });
+  
+  ['dragleave', 'drop'].forEach(eventName => {
+    emojiItems.addEventListener(eventName, unhighlight, false);
+  });
+  
+  function highlight(e) {
+    emojiItems.classList.add('drag-over');
+  }
+  
+  function unhighlight(e) {
+    emojiItems.classList.remove('drag-over');
+  }
+  
+  // Handle dropped files
+  emojiItems.addEventListener('drop', handleDrop, false);
+  
+  async function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
     
-    createTab.addEventListener('dragenter', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragCounter++;
-      createTab.classList.add('drag-over');
+    await handleFiles(files);
+  }
+  
+  async function handleFiles(files) {
+    const validFiles = Array.from(files).filter(file => {
+      const isImage = file.type.startsWith('image/');
+      const isVideo = file.type.startsWith('video/');
+      const isGif = file.type === 'image/gif';
+      return isImage || isVideo || isGif;
     });
     
-    createTab.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragCounter--;
-      if (dragCounter === 0) {
-        createTab.classList.remove('drag-over');
+    if (validFiles.length === 0) {
+      alert('Please drop only image or video files');
+      return;
+    }
+    
+    // Show loading state
+    const originalContent = emojiItems.innerHTML;
+    emojiItems.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">⏳</div>
+        <p class="empty-state-text">Processing ${validFiles.length} file${validFiles.length > 1 ? 's' : ''}...</p>
+      </div>
+    `;
+    
+    // Get current cart
+    const response = await chrome.runtime.sendMessage({ type: 'GET_CART_DATA' });
+    const cart = response.cart || [];
+    
+    let processedCount = 0;
+    let errorCount = 0;
+    
+    // Process each file
+    for (const file of validFiles) {
+      // Check file size (limit to 10MB for data URLs)
+      if (file.size > 10 * 1024 * 1024) {
+        console.warn(`File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
+        errorCount++;
+        continue;
       }
-    });
-    
-    createTab.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    
-    createTab.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragCounter = 0;
-      createTab.classList.remove('drag-over');
       
-      const files = Array.from(e.dataTransfer.files);
-      
-      // Filter for valid file types
-      const validFile = files.find(file => {
-        const isImage = file.type.startsWith('image/');
-        const isVideo = file.type.startsWith('video/');
-        const isGif = file.type === 'image/gif' || file.name.toLowerCase().endsWith('.gif');
-        return isImage || isVideo || isGif;
-      });
-      
-      if (!validFile) {
-        showError('Please drop an image, GIF, or video file');
-        return;
-      }
-      
-      
-      hideAllMessages();
-      if (dragZoneHint) dragZoneHint.style.display = 'none';
-      if (previewSection) previewSection.style.display = 'block';
-      if (previewLoading) previewLoading.style.display = 'flex';
-      
-      // Convert to data URL and show preview
       const reader = new FileReader();
+      
       reader.onload = async (e) => {
         const dataUrl = e.target.result;
         
-        // For video files, show a placeholder or first frame
-        if (validFile.type.startsWith('video/')) {
-          if (previewImage) {
-            previewImage.style.display = 'none';
+        // Generate a name from the filename
+        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+        const emojiName = nameWithoutExt
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '_')
+          .replace(/_+/g, '_')
+          .substring(0, 30);
+        
+        // Add to cart
+        const result = await chrome.runtime.sendMessage({
+          type: 'ADD_TO_EMOJI_CART',
+          emoji: {
+            name: emojiName,
+            url: dataUrl,
+            source: 'local upload',
+            workspace: 'local',
+            isLocal: true,
+            mimeType: file.type,
+            fileSize: file.size
           }
-          showSuccess('Video loaded! Click "Send to Emoji Studio" to convert to emoji.');
+        });
+        
+        if (result.success) {
+          processedCount++;
         } else {
-          if (previewImage) {
-            previewImage.style.display = 'block';
-            previewImage.src = dataUrl;
-          }
-          showSuccess('Image loaded! Click "Send to Emoji Studio" when ready.');
-        }
-        
-        if (previewLoading) previewLoading.style.display = 'none';
-        
-        // Add a send button if it doesn't exist
-        let sendButton = document.getElementById('sendToEmojiStudioButton');
-        if (!sendButton && previewSection) {
-          sendButton = document.createElement('button');
-          sendButton.id = 'sendToEmojiStudioButton';
-          sendButton.className = 'button button-primary';
-          sendButton.style.marginTop = '16px';
-          sendButton.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-            Send to Emoji Studio
-          `;
-          previewSection.appendChild(sendButton);
-        }
-        
-        // Update or add click handler
-        if (sendButton) {
-          sendButton.onclick = async () => {
-            await sendToEmojiStudio(dataUrl);
-          };
+          errorCount++;
         }
       };
       
       reader.onerror = () => {
-        if (previewLoading) previewLoading.style.display = 'none';
-        showError('Failed to read file. Please try again.');
+        console.error(`Failed to read file ${file.name}`);
+        errorCount++;
       };
       
-      reader.readAsDataURL(validFile);
-    });
+      reader.readAsDataURL(file);
+    }
+    
+    // Wait a bit for all files to process
+    setTimeout(() => {
+      loadEmojis(); // Reload to show the new emojis
+      
+      if (processedCount > 0 && errorCount === 0) {
+        // Show success briefly
+        createSuccessMessage.textContent = `${processedCount} file${processedCount > 1 ? 's' : ''} added!`;
+        createSuccessMessage.style.display = 'flex';
+        setTimeout(() => {
+          createSuccessMessage.style.display = 'none';
+        }, 2000);
+      } else if (errorCount > 0) {
+        alert(`${processedCount} file(s) added successfully. ${errorCount} file(s) failed.`);
+      }
+    }, 500);
   }
   
-  function hideAllMessages() {
-    if (successMessage) successMessage.style.display = 'none';
-    if (errorMessage) errorMessage.style.display = 'none';
-    const warningMessage = document.getElementById('warningMessage');
-    if (warningMessage) warningMessage.style.display = 'none';
+  // Also handle dragenter/dragleave on document level for better UX
+  document.addEventListener('dragenter', (e) => {
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      dragCounter++;
+      if (dragCounter === 1 && document.querySelector('[data-tab="create"].active')) {
+        emojiItems.classList.add('drag-over');
+      }
+    }
+  });
+  
+  document.addEventListener('dragleave', (e) => {
+    dragCounter--;
+    if (dragCounter === 0) {
+      emojiItems.classList.remove('drag-over');
+    }
+  });
+  
+  document.addEventListener('drop', (e) => {
+    dragCounter = 0;
+    emojiItems.classList.remove('drag-over');
+  });
+}
+
+// Upload emojis directly to Slack without dialog
+async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
+  const createSuccessMessage = document.getElementById('createSuccessMessage');
+  const createSuccessText = document.getElementById('createSuccessText');
+  const createErrorMessage = document.getElementById('createErrorMessage');
+  const createErrorText = document.getElementById('createErrorText');
+  
+  // Hide messages initially
+  createSuccessMessage.style.display = 'none';
+  createErrorMessage.style.display = 'none';
+  
+  // Show processing message
+  createSuccessText.textContent = `Uploading ${emojis.length} emoji${emojis.length > 1 ? 's' : ''} to Slack...`;
+  createSuccessMessage.style.display = 'flex';
+  
+  const results = [];
+  let successCount = 0;
+  let errorCount = 0;
+  let authFailed = false;
+  
+  // Upload emojis one by one
+  for (let i = 0; i < emojis.length; i++) {
+    const emoji = emojis[i];
+    
+    // Update progress message
+    createSuccessText.textContent = `Uploading ${i + 1} of ${emojis.length}: ${emoji.name}`;
+    
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: 'UPLOAD_EMOJI_TO_SLACK',
+        emoji: emoji,
+        workspaceData: workspaceData
+      });
+      
+      if (result.success) {
+        successCount++;
+        results.push({
+          name: emoji.name,
+          success: true
+        });
+      } else {
+        errorCount++;
+        
+        // Check if it's an authentication error
+        if (result.error && (result.error.includes('authentication') || 
+                           result.error.includes('not_authed') || 
+                           result.error.includes('invalid_auth'))) {
+          authFailed = true;
+          results.push({
+            name: emoji.name,
+            success: false,
+            error: result.error
+          });
+          // Stop trying more uploads if auth failed
+          break;
+        } else {
+          results.push({
+            name: emoji.name,
+            success: false,
+            error: result.error || 'Upload failed'
+          });
+        }
+      }
+    } catch (error) {
+      errorCount++;
+      results.push({
+        name: emoji.name,
+        success: false,
+        error: error.message || 'Upload failed'
+      });
+    }
+    
+    // Add a small delay between uploads to avoid rate limiting
+    if (i < emojis.length - 1 && !authFailed) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
   
-  function showSuccess(message) {
-    if (successText) successText.textContent = message;
-    if (successMessage) successMessage.style.display = 'flex';
-  }
-  
-  function showError(message) {
-    if (errorText) errorText.textContent = message;
-    if (errorMessage) errorMessage.style.display = 'flex';
+  // Show final results
+  if (authFailed) {
+    createErrorText.textContent = 'Authentication failed. Please visit your Slack workspace and try again.';
+    createErrorMessage.style.display = 'flex';
+    createSuccessMessage.style.display = 'none';
+  } else if (successCount === emojis.length) {
+    createSuccessText.textContent = `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded successfully to Slack!`;
+    createSuccessMessage.style.display = 'flex';
+    
+    // Clear cart on success
+    await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
+    
+    // Reload the emoji list after a short delay
+    setTimeout(() => {
+      initializeCreateTab();
+    }, 2000);
+  } else if (successCount > 0) {
+    createSuccessText.textContent = `${successCount} succeeded, ${errorCount} failed. Check failed emojis in your cart.`;
+    createSuccessMessage.style.display = 'flex';
+    
+    // Remove successful emojis from cart
+    const failedEmojis = results.filter(r => !r.success).map(r => r.name);
+    const response = await chrome.runtime.sendMessage({ type: 'GET_CART_DATA' });
+    const currentCart = response.cart || [];
+    const updatedCart = currentCart.filter(emoji => failedEmojis.includes(emoji.name));
+    await chrome.storage.local.set({ emojiCart: updatedCart });
+    
+    // Reload the emoji list
+    setTimeout(() => {
+      initializeCreateTab();
+    }, 2000);
+  } else {
+    createErrorText.textContent = 'All uploads failed. Please check your connection and try again.';
+    createErrorMessage.style.display = 'flex';
+    createSuccessMessage.style.display = 'none';
   }
 }
+
+// Show Slack upload dialog
+function showSlackUploadDialog(emojis, workspaceData) {
+  // Create dialog overlay
+  const dialog = document.createElement('div');
+  dialog.className = 'upload-dialog-overlay';
+  dialog.innerHTML = `
+    <div class="upload-dialog">
+      <div class="upload-dialog-header">
+        <h3>Upload to Slack</h3>
+        <button class="upload-dialog-close" id="closeUploadDialog">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="upload-dialog-content">
+        <div class="upload-dialog-info">
+          <p class="upload-dialog-workspace">
+            Uploading to <strong>${workspaceData.workspace}.slack.com</strong>
+          </p>
+          <p class="upload-dialog-count">
+            ${emojis.length} emoji${emojis.length > 1 ? 's' : ''} ready to upload
+          </p>
+        </div>
+        
+        <div class="upload-dialog-choice">
+          <button class="button button-primary full-width" id="uploadDirectlyBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
+              <path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z"></path>
+            </svg>
+            Upload Directly to Slack
+          </button>
+          
+          <div class="upload-dialog-or">or</div>
+          
+          <button class="button button-secondary full-width" id="useEmojiStudioBtn">
+            <img src="logo.png" width="16" height="16" alt="Emoji Studio">
+            Open in Emoji Studio App
+          </button>
+        </div>
+        
+        <div class="upload-progress" id="uploadProgress" style="display: none;">
+          <div class="upload-progress-bar">
+            <div class="upload-progress-fill" id="uploadProgressFill"></div>
+          </div>
+          <p class="upload-progress-text" id="uploadProgressText">Uploading...</p>
+        </div>
+        
+        <div class="upload-results" id="uploadResults" style="display: none;">
+          <div class="upload-results-summary" id="uploadResultsSummary"></div>
+          <div class="upload-results-list" id="uploadResultsList"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(dialog);
+  
+  // Add event listeners
+  document.getElementById('closeUploadDialog').addEventListener('click', () => {
+    dialog.remove();
+  });
+  
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) {
+      dialog.remove();
+    }
+  });
+  
+  document.getElementById('uploadDirectlyBtn').addEventListener('click', async () => {
+    await uploadEmojisDirectly(emojis, workspaceData, dialog);
+  });
+  
+  document.getElementById('useEmojiStudioBtn').addEventListener('click', async () => {
+    // Original behavior - open in Emoji Studio app
+    // Separate local uploads from slackmojis emojis
+    const localEmojis = emojis.filter(e => e.isLocal);
+    const slackEmojis = emojis.filter(e => !e.isLocal);
+    
+    // Prepare data for Emoji Studio
+    const emojiData = {
+      workspace: workspaceData.workspace,
+      authData: workspaceData,
+      emojis: emojis,
+      source: 'extension-cart',
+      hasLocalUploads: localEmojis.length > 0
+    };
+    
+    // Store data for Emoji Studio
+    await chrome.storage.local.set({
+      pendingEmojiStudioCart: emojiData,
+      pendingExtensionData: workspaceData
+    });
+    
+    // Open Emoji Studio
+    const emojiStudioUrl = getEmojiStudioUrl('/create?from=extension-cart');
+    chrome.tabs.create({ url: emojiStudioUrl });
+    
+    // Clear emojis after sending
+    await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
+    
+    dialog.remove();
+    
+    // Reload the emoji list
+    initializeCreateTab();
+  });
+}
+
+// Upload emojis directly to Slack
+async function uploadEmojisDirectly(emojis, workspaceData, dialog) {
+  const progressSection = document.getElementById('uploadProgress');
+  const progressFill = document.getElementById('uploadProgressFill');
+  const progressText = document.getElementById('uploadProgressText');
+  const resultsSection = document.getElementById('uploadResults');
+  const resultsSummary = document.getElementById('uploadResultsSummary');
+  const resultsList = document.getElementById('uploadResultsList');
+  const choiceSection = dialog.querySelector('.upload-dialog-choice');
+  
+  // Hide choice buttons, show progress
+  choiceSection.style.display = 'none';
+  progressSection.style.display = 'block';
+  
+  const results = [];
+  let successCount = 0;
+  let errorCount = 0;
+  let authFailed = false;
+  
+  // Upload emojis one by one
+  for (let i = 0; i < emojis.length; i++) {
+    const emoji = emojis[i];
+    const progress = ((i + 1) / emojis.length) * 100;
+    
+    progressFill.style.width = `${progress}%`;
+    progressText.textContent = `Uploading ${i + 1} of ${emojis.length}: ${emoji.name}`;
+    
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: 'UPLOAD_EMOJI_TO_SLACK',
+        emoji: emoji,
+        workspaceData: workspaceData
+      });
+      
+      if (result.success) {
+        successCount++;
+        results.push({
+          name: emoji.name,
+          success: true
+        });
+      } else {
+        errorCount++;
+        
+        // Check if it's an authentication error
+        if (result.error && (result.error.includes('authentication') || 
+                           result.error.includes('not_authed') || 
+                           result.error.includes('invalid_auth'))) {
+          authFailed = true;
+          results.push({
+            name: emoji.name,
+            success: false,
+            error: result.error
+          });
+          // Stop trying more uploads if auth failed
+          break;
+        } else {
+          results.push({
+            name: emoji.name,
+            success: false,
+            error: result.error || 'Upload failed'
+          });
+        }
+      }
+    } catch (error) {
+      errorCount++;
+      results.push({
+        name: emoji.name,
+        success: false,
+        error: error.message || 'Upload failed'
+      });
+    }
+    
+    // Add a small delay between uploads to avoid rate limiting
+    if (i < emojis.length - 1 && !authFailed) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  // Show results
+  progressSection.style.display = 'none';
+  resultsSection.style.display = 'block';
+  
+  // Update summary
+  if (authFailed) {
+    resultsSummary.innerHTML = `
+      <div class="upload-error">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span>Authentication Failed</span>
+      </div>
+      <p style="margin-top: 12px; color: #6b7280; font-size: 13px; line-height: 1.5;">
+        Your Slack session has expired. To fix this:
+      </p>
+      <ol style="margin: 8px 0 0 20px; color: #6b7280; font-size: 13px; line-height: 1.6;">
+        <li>Click "Visit Slack" below</li>
+        <li>Sign in to your workspace</li>
+        <li>Return here and try uploading again</li>
+      </ol>
+      <button id="visitSlackBtn" style="
+        margin-top: 12px;
+        background: #4a154b;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 500;
+      ">Visit Slack</button>
+    `;
+    
+    // Add click handler for Visit Slack button
+    setTimeout(() => {
+      const visitBtn = document.getElementById('visitSlackBtn');
+      if (visitBtn) {
+        visitBtn.addEventListener('click', () => {
+          const workspace = workspaceData.workspace;
+          if (workspace) {
+            chrome.tabs.create({ url: `https://${workspace}.slack.com/customize/emoji` });
+          }
+        });
+      }
+    }, 100);
+  } else if (successCount === emojis.length) {
+    resultsSummary.innerHTML = `
+      <div class="upload-success">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="9 12 12 15 16 10"></polyline>
+        </svg>
+        <span>All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded successfully!</span>
+      </div>
+    `;
+  } else if (successCount > 0) {
+    resultsSummary.innerHTML = `
+      <div class="upload-mixed">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span>${successCount} succeeded, ${errorCount} failed</span>
+      </div>
+    `;
+  } else {
+    resultsSummary.innerHTML = `
+      <div class="upload-error">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="15" y1="9" x2="9" y2="15"></line>
+          <line x1="9" y1="9" x2="15" y2="15"></line>
+        </svg>
+        <span>All uploads failed</span>
+      </div>
+    `;
+  }
+  
+  // Show individual results if there were errors
+  if (errorCount > 0) {
+    const errorResults = results.filter(r => !r.success);
+    resultsList.innerHTML = `
+      <h4>Failed uploads:</h4>
+      ${errorResults.map(r => `
+        <div class="upload-result-item error">
+          <span class="emoji-name">:${r.name}:</span>
+          <span class="error-message">${r.error}</span>
+        </div>
+      `).join('')}
+    `;
+  }
+  
+  // Clear cart if all successful
+  if (successCount === emojis.length) {
+    await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
+    
+    // Auto-close dialog after 3 seconds
+    setTimeout(() => {
+      dialog.remove();
+      initializeCreateTab(); // Reload the list
+    }, 3000);
+  } else {
+    // Add a button to close and optionally retry failed ones
+    resultsList.innerHTML += `
+      <div class="upload-results-actions">
+        <button class="button button-secondary" id="closeResultsBtn">Close</button>
+      </div>
+    `;
+    
+    document.getElementById('closeResultsBtn').addEventListener('click', () => {
+      dialog.remove();
+      initializeCreateTab(); // Reload to show remaining emojis
+    });
+  }
+}
+
+// Create tab functionality for managing emojis

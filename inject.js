@@ -96,6 +96,29 @@
             chrome.storage.local.remove(['pendingEmojiAdd']);
           }
         });
+        
+        // Check for cart data (from extension-cart flow)
+        if (urlParams.get('from') === 'extension-cart') {
+          chrome.storage.local.get(['pendingEmojiStudioCart'], (result) => {
+            if (result.pendingEmojiStudioCart) {
+              console.log('[Inject] Found cart data:', result.pendingEmojiStudioCart);
+              
+              // Small delay to ensure the page is ready
+              setTimeout(() => {
+                // Send cart data to the page
+                window.postMessage({
+                  type: 'EMOJI_STUDIO_CART_DATA',
+                  data: result.pendingEmojiStudioCart
+                }, '*');
+              }, 500);
+              
+              // Clear the pending data
+              chrome.storage.local.remove(['pendingEmojiStudioCart']);
+            } else {
+              console.log('[Inject] No cart data found in storage');
+            }
+          });
+        }
       }
   }
   

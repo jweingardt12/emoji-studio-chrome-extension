@@ -1,61 +1,92 @@
 let capturedData = {};
 let pendingRequestData = new Map();
 let lastNotificationTime = {}; // Track last notification time per workspace
+let emojiCart = []; // Cart to store emojis before adding to Emoji Studio
 
 // Environment configuration
 const EMOJI_STUDIO_URLS = {
-  development: 'http://localhost:3001',
+  development: 'http://localhost:3002',
   production: 'https://app.emojistudio.xyz'
 };
 
 // Force production mode - set this to true to always use production URLs
-const FORCE_PRODUCTION = true; // Always use production for Chrome Store
+const FORCE_PRODUCTION = true; // Set to true for production release
 
-// Detect environment - check if localhost is accessible
-let currentEnvironment = 'production'; // default to production
-
-function detectEnvironment() {
-  // If force production is enabled, skip detection
-  if (FORCE_PRODUCTION) {
-    currentEnvironment = 'production';
-    return;
-  }
-  
-  // Try to fetch from localhost to detect if we're in development
-  // Use a more specific endpoint that would only exist in Emoji Studio
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
-  
-  fetch('http://localhost:3001/api/slack/workspaces', { 
-    method: 'GET',
-    signal: controller.signal,
-    headers: {
-      'Accept': 'application/json'
-    }
-  })
-    .then(response => {
-      clearTimeout(timeoutId);
-      // Only consider it development if we get a valid response
-      if (response.ok || response.status === 401 || response.status === 404) {
-        currentEnvironment = 'development';
-      } else {
-        currentEnvironment = 'production';
-      }
-    })
-    .catch(() => {
-      clearTimeout(timeoutId);
-      currentEnvironment = 'production';
-    });
-}
+// Set environment based on FORCE_PRODUCTION flag
+let currentEnvironment = FORCE_PRODUCTION ? 'production' : 'development';
 
 function getEmojiStudioUrl(path = '') {
   const baseUrl = EMOJI_STUDIO_URLS[currentEnvironment];
   return path ? `${baseUrl}${path}` : baseUrl;
 }
 
+// Service workers in Manifest V3 should be allowed to go idle
+// The browser will wake them up when needed for events
 
-// Detect environment on startup
-detectEnvironment();
+// Simple parseSlackCurl function to extract auth data from curl command
+function parseSlackCurl(curlCommand) {
+  if (!curlCommand) {
+    return { isValid: false };
+  }
+  
+  const result = {
+    isValid: false,
+    token: null,
+    cookie: null,
+    workspace: null,
+    teamId: null,
+    xId: null
+  };
+  
+  // Extract workspace
+  const workspaceMatch = curlCommand.match(/https:\/\/([^.]+)\.slack\.com/);
+  if (workspaceMatch) {
+    result.workspace = workspaceMatch[1];
+  }
+  
+  // Extract token
+  const tokenMatch = curlCommand.match(/token=([^\s'"&]+)/) || 
+                     curlCommand.match(/Bearer\s+([^\s'"]+)/);
+  if (tokenMatch) {
+    result.token = tokenMatch[1];
+  }
+  
+  // Extract cookie
+  const cookieMatch = curlCommand.match(/-H\s+['"]Cookie:\s*([^'"]+)['"]/);
+  if (cookieMatch) {
+    result.cookie = cookieMatch[1];
+  }
+  
+  // Extract team ID
+  const teamIdMatch = curlCommand.match(/slack_route=([^&\s'"]+)/);
+  if (teamIdMatch) {
+    result.teamId = teamIdMatch[1];
+  }
+  
+  // Extract x_id
+  const xIdMatch = curlCommand.match(/_x_id=([^&\s'"]+)/);
+  if (xIdMatch) {
+    result.xId = xIdMatch[1];
+  }
+  
+  // Validate
+  result.isValid = !!(result.token && result.cookie && result.workspace);
+  
+  return result;
+}
+
+// Function to update badge based on cart contents
+function updateCartBadge() {
+  if (emojiCart.length > 0) {
+    chrome.action.setBadgeText({ text: String(emojiCart.length) });
+    chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' }); // Orange for cart items
+  } else if (Object.keys(capturedData).length > 0) {
+    chrome.action.setBadgeText({ text: '✓' });
+    chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+  } else {
+    chrome.action.setBadgeText({ text: '' });
+  }
+}
 
 // Initialize the extension and set up alarms
 chrome.runtime.onInstalled.addListener(() => {
@@ -66,9 +97,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
   
   // Load existing data from storage
-  chrome.storage.local.get('slackData', (result) => {
+  chrome.storage.local.get(['slackData', 'emojiCart'], (result) => {
     if (result.slackData) {
       capturedData = result.slackData;
+    }
+    if (result.emojiCart) {
+      emojiCart = result.emojiCart;
     }
   });
   
@@ -85,7 +119,8 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // Also load data on startup (not just on install)
-chrome.storage.local.get('slackData', (result) => {
+chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand'], (result) => {
+  console.log('Loading data on startup:', result);
   if (result.slackData) {
     capturedData = result.slackData;
     
@@ -94,7 +129,17 @@ chrome.storage.local.get('slackData', (result) => {
       chrome.action.setBadgeText({ text: '✓' });
       chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
     }
+  }
+  if (result.slackCurlCommand) {
+    console.log('Found stored curl command');
+  }
+  if (result.emojiCart) {
+    emojiCart = result.emojiCart;
+    console.log('Loaded cart with', emojiCart.length, 'items');
+    updateCartBadge();
   } else {
+    emojiCart = [];
+    console.log('No cart found, initialized empty cart');
   }
 });
 
@@ -191,6 +236,14 @@ function checkAndAutoSync() {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Validate message structure
+  if (!request || typeof request.type !== 'string') {
+    console.warn('Invalid message received:', request);
+    sendResponse({ success: false, error: 'Invalid message format' });
+    return false;
+  }
+  
+  console.log('Background received message:', request.type);
   
   if (request.type === 'SLACK_DATA_CAPTURED') {
     const workspace = request.data.workspace;
@@ -200,7 +253,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     capturedData = {};
     capturedData[workspace] = request.data;
     
-    chrome.storage.local.set({ slackData: capturedData }, () => {
+    // Also store a curl command that can be reused later
+    const authData = request.data;
+    console.log('Attempting to store curl command. Auth data:', {
+      hasToken: !!authData.token,
+      tokenType: authData.token ? authData.token.substring(0, 10) + '...' : 'none',
+      hasFormToken: !!authData.formToken,
+      formTokenType: authData.formToken ? authData.formToken.substring(0, 10) + '...' : 'none',
+      hasCookie: !!authData.cookie,
+      workspace: authData.workspace
+    });
+    
+    // Prefer formToken (xoxc) over cookie token (xoxd)
+    const token = authData.formToken || authData.token;
+    console.log('Choosing token:', {
+      formToken: authData.formToken ? authData.formToken.substring(0, 15) + '...' : 'none',
+      cookieToken: authData.token ? authData.token.substring(0, 15) + '...' : 'none',
+      chosen: token ? token.substring(0, 15) + '...' : 'none'
+    });
+    
+    if (token && authData.cookie && authData.workspace) {
+      const xId = authData.xId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const teamId = authData.teamId || '';
+      
+      // Construct curl command exactly like Emoji Studio expects - with multipart form data
+      const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
+      const curlCommand = `curl 'https://${authData.workspace}.slack.com/api/emoji.adminList?_x_id=${xId}&_x_version_ts=noversion&fp=98' \\
+        -H 'accept: */*' \\
+        -H 'accept-language: en-US,en;q=0.9' \\
+        -H 'cache-control: no-cache' \\
+        -H 'content-type: multipart/form-data; boundary=${boundary}' \\
+        -b '${authData.cookie}' \\
+        -H 'pragma: no-cache' \\
+        -H 'sec-fetch-dest: empty' \\
+        -H 'sec-fetch-mode: cors' \\
+        -H 'sec-fetch-site: same-origin' \\
+        --data-raw $'------${boundary}\\r\\nContent-Disposition: form-data; name="token"\\r\\n\\r\\n${token}\\r\\n------${boundary}\\r\\nContent-Disposition: form-data; name="count"\\r\\n\\r\\n20000\\r\\n------${boundary}--\\r\\n'`;
+      
+      console.log('Storing curl command for future use');
+      console.log('Token:', token ? token.substring(0, 15) + '...' : 'none');
+      console.log('Cookie length:', authData.cookie ? authData.cookie.length : 0);
+      capturedData[workspace].storedCurlCommand = curlCommand;
+      capturedData[workspace].token = token; // Also store the token directly
+    }
+    
+    chrome.storage.local.set({ 
+      slackData: capturedData,
+      slackCurlCommand: capturedData[workspace].storedCurlCommand || null
+    }, () => {
       if (chrome.runtime.lastError) {
       } else {
         
@@ -260,7 +360,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep channel open for async response
   } else if (request.type === 'CLEAR_DATA') {
     capturedData = {};
-    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData']);
+    emojiCart = [];
+    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData', 'emojiCart', 'slackCurlCommand']);
     chrome.action.setBadgeText({ text: '' });
     lastNotificationTime = {}; // Reset notification tracking
     
@@ -297,6 +398,125 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       title: request.title,
       message: request.message
     });
+    sendResponse({ success: true });
+  } else if (request.type === 'ADD_TO_EMOJI_CART') {
+    console.log('Adding emoji to cart:', request.emoji);
+    
+    // Initialize cart if needed
+    if (!Array.isArray(emojiCart)) {
+      console.log('Initializing empty cart');
+      emojiCart = [];
+    }
+    
+    // Implement size limit (max 100 emojis)
+    const MAX_CART_SIZE = 100;
+    if (emojiCart.length >= MAX_CART_SIZE) {
+      console.warn('Cart is full, cannot add more emojis');
+      sendResponse({ success: false, error: `Maximum of ${MAX_CART_SIZE} emojis allowed` });
+      return;
+    }
+    
+    const emoji = request.emoji;
+    
+    // Validate emoji data
+    if (!emoji || !emoji.name || !emoji.url) {
+      console.warn('Invalid emoji data:', emoji);
+      sendResponse({ success: false, error: 'Invalid emoji data' });
+      return;
+    }
+    
+    // Handle data URLs for local uploads
+    if (emoji.url.startsWith('data:')) {
+      // Data URLs are already valid, no need to validate further
+      console.log('Processing local file upload:', emoji.name);
+    }
+    
+    // Check if emoji already exists
+    const exists = emojiCart.some(e => e.name === emoji.name && e.workspace === emoji.workspace);
+    
+    if (!exists) {
+      emojiCart.push(emoji);
+      console.log('Cart now has', emojiCart.length, 'items');
+      
+      // Save to storage
+      chrome.storage.local.set({ emojiCart: emojiCart }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage error:', chrome.runtime.lastError);
+          sendResponse({ success: false, error: 'Storage error' });
+        } else {
+          console.log('Cart saved successfully');
+          updateCartBadge();
+          sendResponse({ success: true, cartSize: emojiCart.length });
+        }
+      });
+    } else {
+      console.log('Emoji already in cart');
+      sendResponse({ success: false, error: 'Already in cart' });
+    }
+    
+    return true; // Keep channel open for async response
+  } else if (request.type === 'GET_CART_DATA') {
+    // Ensure we have the latest cart data
+    if (!Array.isArray(emojiCart)) {
+      emojiCart = [];
+    }
+    sendResponse({ cart: emojiCart });
+  } else if (request.type === 'REMOVE_FROM_CART') {
+    const index = emojiCart.findIndex(e => 
+      e.name === request.emojiName && e.workspace === request.workspace
+    );
+    if (index > -1) {
+      emojiCart.splice(index, 1);
+      chrome.storage.local.set({ emojiCart: emojiCart }, () => {
+        updateCartBadge();
+        sendResponse({ success: true, cartSize: emojiCart.length });
+      });
+    } else {
+      sendResponse({ success: false, error: 'Emoji not found in cart' });
+    }
+    return true; // Keep channel open for async response
+  } else if (request.type === 'CLEAR_CART') {
+    emojiCart = [];
+    chrome.storage.local.set({ emojiCart: [] }, () => {
+      updateCartBadge();
+      sendResponse({ success: true });
+    });
+    return true; // Keep channel open for async response
+  } else if (request.type === 'HIGHLIGHT_EXTENSION_ICON') {
+    // Set flag to open create tab when popup opens
+    chrome.storage.local.set({ openCreateTab: true });
+    
+    // Try to open the popup directly (works in Chrome 116+)
+    if (chrome.action.openPopup) {
+      chrome.action.openPopup().catch(() => {
+        // If openPopup fails, fall back to badge animation
+        animateExtensionBadge();
+      });
+    } else {
+      // Older Chrome versions: animate the badge
+      animateExtensionBadge();
+    }
+    
+    function animateExtensionBadge() {
+      // Animate the badge to draw attention
+      let flashCount = 0;
+      const flashInterval = setInterval(() => {
+        if (flashCount % 2 === 0) {
+          chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
+          chrome.action.setBadgeText({ text: '!' });
+        } else {
+          // Restore original
+          updateCartBadge(); // This will set the correct badge
+        }
+        
+        flashCount++;
+        if (flashCount >= 6) { // Flash 3 times
+          clearInterval(flashInterval);
+          updateCartBadge(); // Ensure correct badge state
+        }
+      }, 300);
+    }
+    
     sendResponse({ success: true });
   } else if (request.type === 'FETCH_IMAGE') {
     
@@ -528,6 +748,348 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     
     return true; // Keep channel open for async response
+  } else if (request.type === 'UPLOAD_EMOJI_TO_SLACK') {
+    console.log('Uploading emoji to Slack:', request.emoji.name);
+    
+    const emoji = request.emoji;
+    let workspaceData = request.workspaceData;
+    
+    // Handle the upload asynchronously
+    (async () => {
+      // First, check if we have a stored curl command
+      const storedData = await chrome.storage.local.get(['slackCurlCommand', 'slackData']);
+      
+      if (storedData.slackCurlCommand) {
+        console.log('Using stored curl command for upload');
+        // Parse the stored curl command to get auth data
+        const parsedCurl = parseSlackCurl(storedData.slackCurlCommand);
+        if (parsedCurl.isValid) {
+          // Override with stored auth data
+          workspaceData = {
+            workspace: parsedCurl.workspace || workspaceData.workspace,
+            token: parsedCurl.token,
+            cookie: parsedCurl.cookie,
+            teamId: parsedCurl.teamId || workspaceData.teamId,
+            xId: parsedCurl.xId || workspaceData.xId
+          };
+        }
+      }
+      
+      // Validate we have the necessary auth data
+      if (!workspaceData || !workspaceData.workspace) {
+        sendResponse({ success: false, error: 'Missing Slack authentication data' });
+        return;
+      }
+      
+      // Check if we have some form of authentication
+      if (!workspaceData.token && !workspaceData.cookie) {
+        sendResponse({ success: false, error: 'No authentication credentials found. Please visit your Slack workspace emoji page.' });
+        return;
+      }
+      
+      try {
+      // Parse headers to extract needed values
+      const cookie = workspaceData.authHeaders?.cookie || workspaceData.cookie || '';
+      const xSlackClientId = workspaceData.xSlackClientId || '';
+      
+      // Extract token from various sources
+      let token = workspaceData.token || workspaceData.formToken || '';
+      
+      // If no token yet, try to extract from cookie
+      if (!token && cookie) {
+        // Try to find xox token in cookies
+        const cookies = cookie.split(/;\s*/);
+        for (const c of cookies) {
+          const [name, value] = c.split('=');
+          if (name === 'd' && value) {
+            try {
+              const decodedValue = decodeURIComponent(value);
+              if (decodedValue.startsWith('xox')) {
+                token = decodedValue;
+                break;
+              }
+            } catch (e) {
+              if (value.startsWith('xox')) {
+                token = value;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Fallback to regex match
+        if (!token) {
+          const tokenMatch = cookie.match(/\bxox[a-zA-Z]-[^\s;]+/);
+          if (tokenMatch) {
+            token = tokenMatch[0];
+          }
+        }
+      }
+      
+      // Also check if token is in the authHeaders
+      if (!token && workspaceData.authHeaders?.authorization) {
+        const authMatch = workspaceData.authHeaders.authorization.match(/Bearer\s+(xox[a-zA-Z]-[\w-]+)/);
+        if (authMatch) {
+          token = authMatch[1];
+        }
+      }
+      
+      if (!token) {
+        console.error('No token found. Debug info:', {
+          hasWorkspaceData: !!workspaceData,
+          hasToken: !!workspaceData.token,
+          hasFormToken: !!workspaceData.formToken,
+          hasCookie: !!workspaceData.cookie,
+          hasAuthHeaders: !!workspaceData.authHeaders,
+          cookieLength: workspaceData.cookie ? workspaceData.cookie.length : 0
+        });
+        sendResponse({ success: false, error: 'No Slack token found. Please visit your Slack workspace emoji page.' });
+        return;
+      }
+      
+      console.log('Using token:', token.substring(0, 15) + '...');
+      
+      // Extract team ID from various sources
+      let teamId = workspaceData.teamId || '';
+      if (!teamId && workspaceData.authHeaders) {
+        // Try to extract from x-slack-team-id header
+        const teamHeader = Object.entries(workspaceData.authHeaders).find(([key, value]) => 
+          key.toLowerCase() === 'x-slack-team-id'
+        );
+        if (teamHeader) {
+          teamId = teamHeader[1];
+        }
+      }
+      if (!teamId && cookie) {
+        // Try to extract from cookie
+        const teamMatch = cookie.match(/\bd=([^;]+)/);
+        if (teamMatch) {
+          try {
+            const dCookie = JSON.parse(decodeURIComponent(teamMatch[1]));
+            teamId = dCookie.team_id || '';
+          } catch (e) {
+            console.warn('Failed to parse d cookie:', e);
+          }
+        }
+      }
+      
+      // Prepare the emoji data
+      let imageBlob;
+      let fileName;
+      let mimeType;
+      
+      if (emoji.url.startsWith('data:')) {
+        // Local upload - convert data URL to blob
+        const response = await fetch(emoji.url);
+        imageBlob = await response.blob();
+        mimeType = imageBlob.type;
+        
+        // Determine file extension
+        const extension = mimeType.includes('gif') ? 'gif' : 
+                         mimeType.includes('video') ? 'mp4' : 'png';
+        fileName = `${emoji.name}.${extension}`;
+      } else {
+        // Remote URL - fetch the image
+        try {
+          const response = await fetch(emoji.url);
+          imageBlob = await response.blob();
+          mimeType = imageBlob.type || 'image/png';
+          
+          // Determine file extension from URL or mime type
+          const urlExt = emoji.url.match(/\.([^.]+)$/);
+          const extension = urlExt ? urlExt[1].toLowerCase() : 
+                           mimeType.includes('gif') ? 'gif' : 'png';
+          fileName = `${emoji.name}.${extension}`;
+        } catch (fetchError) {
+          console.error('Failed to fetch emoji:', fetchError);
+          sendResponse({ success: false, error: 'Failed to fetch emoji image' });
+          return;
+        }
+      }
+      
+      // Create FormData for the upload
+      const formData = new FormData();
+      formData.append('token', token);
+      formData.append('name', emoji.name);
+      formData.append('mode', 'data');
+      formData.append('search_args', '{}');
+      
+      // Add the image file
+      const file = new File([imageBlob], fileName, { type: mimeType });
+      formData.append('image', file);
+      
+      // Add additional fields
+      formData.append('_x_reason', 'add-custom-emoji-dialog-content');
+      formData.append('_x_mode', 'online');
+      
+      // Extract x_id from stored data or generate one
+      const xId = workspaceData.xId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const slackRoute = teamId || '';
+      
+      // Construct the upload URL
+      const uploadUrl = `https://${workspaceData.workspace}.slack.com/api/emoji.add?_x_id=${xId}&slack_route=${slackRoute}&_x_version_ts=noversion&fp=5c&_x_num_retries=0`;
+      
+      console.log('Uploading to:', uploadUrl);
+      
+      // Convert FormData to a plain object for the proxy
+      const formDataObj = {};
+      for (const [key, value] of formData.entries()) {
+        if (key !== 'image' && value !== undefined && value !== null) {
+          formDataObj[key] = value;
+        }
+      }
+      
+      // Convert the image blob to data URL for transport
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(imageBlob);
+      });
+      
+      // Use stored curl if available, otherwise construct from current data
+      const storedCurl = await chrome.storage.local.get('slackCurlCommand');
+      let curlCommand;
+      
+      if (storedCurl.slackCurlCommand) {
+        // Update the stored curl command with the new emoji name
+        curlCommand = storedCurl.slackCurlCommand
+          .replace(/emoji\.adminList/, 'emoji.add')
+          .replace(/--data\s+'token=[^']+'/g, `--form 'token=${token}'`)
+          + ` --form 'name=${emoji.name}' --form 'mode=data' --form '_x_reason=add-custom-emoji-dialog-content' --form '_x_mode=online' --form 'image=@${fileName}'`;
+      } else {
+        // Construct new curl command
+        curlCommand = `curl 'https://${workspaceData.workspace}.slack.com/api/emoji.add?_x_id=${xId}&slack_route=${teamId}&_x_version_ts=noversion&fp=5c&_x_num_retries=0' \\
+          -H 'Accept: */*' \\
+          -H 'Accept-Language: en-US,en;q=0.9' \\
+          -H 'Cache-Control: no-cache' \\
+          -H 'Content-Type: multipart/form-data' \\
+          -H 'Cookie: ${cookie}' \\
+          -H 'Origin: https://${workspaceData.workspace}.slack.com' \\
+          -H 'Referer: https://${workspaceData.workspace}.slack.com/customize/emoji' \\
+          -H 'Sec-Ch-Ua: "Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"' \\
+          -H 'Sec-Ch-Ua-Mobile: ?0' \\
+          -H 'Sec-Ch-Ua-Platform: "macOS"' \\
+          -H 'Sec-Fetch-Dest: empty' \\
+          -H 'Sec-Fetch-Mode: cors' \\
+          -H 'Sec-Fetch-Site: same-origin' \\
+          -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' \\
+          --form 'token=${token}' \\
+          --form 'name=${emoji.name}' \\
+          --form 'mode=data' \\
+          --form '_x_reason=add-custom-emoji-dialog-content' \\
+          --form '_x_mode=online' \\
+          --form 'search_args={}' \\
+          --form 'image=@${fileName}'`;
+      }
+      
+      // Use the same upload logic as Emoji Studio
+      console.log('Using Emoji Studio upload logic');
+      console.log('Token:', token ? token.substring(0, 15) + '...' : 'none');
+      console.log('Cookie length:', cookie ? cookie.length : 0);
+      console.log('Upload URL:', uploadUrl);
+      
+      // Store the curl command in localStorage like Emoji Studio does
+      await chrome.storage.local.set({
+        slackCurlCommand: curlCommand
+      });
+      
+      // Store curl in localStorage for the Emoji Studio app to use
+      // This is how Emoji Studio expects to receive the auth data
+      const storageScript = `localStorage.setItem('slackCurlCommand', ${JSON.stringify(curlCommand)})`;
+      
+      // Now perform the upload using the same approach as Emoji Studio
+      try {
+        // Create a proxy request that mimics what Emoji Studio does
+        const proxyResponse = await fetch(`${EMOJI_STUDIO_URLS[currentEnvironment]}/api/slack-emoji-upload`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: uploadUrl,
+            formData: formDataObj,
+            headers: {
+              'Accept': '*/*',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Cache-Control': 'no-cache',
+              'Origin': `https://${workspaceData.workspace}.slack.com`,
+              'Referer': `https://${workspaceData.workspace}.slack.com/customize/emoji`,
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Cookie': cookie,
+              'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+              'Sec-Ch-Ua-Mobile': '?0',
+              'Sec-Ch-Ua-Platform': '"macOS"',
+              'Sec-Fetch-Dest': 'empty',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Site': 'same-origin'
+            },
+            blob: dataUrl,
+            fileName: fileName,
+            mimeType: mimeType
+          })
+        });
+        
+        const result = await proxyResponse.json();
+        console.log('Upload result:', result);
+        
+        if (result.success && result.data && result.data.ok) {
+          sendResponse({ success: true, emojiName: emoji.name });
+        } else {
+          // Handle error cases
+          let errorMessage = 'Upload failed';
+          const errorCode = result.error || result.details?.error || result.data?.error;
+          
+          console.error('Upload failed with error:', errorCode);
+          console.error('Full result:', JSON.stringify(result, null, 2));
+          
+          if (errorCode === 'error_name_taken') {
+            errorMessage = `Emoji name "${emoji.name}" is already taken`;
+          } else if (errorCode === 'error_bad_name_i18n') {
+            errorMessage = `Invalid emoji name "${emoji.name}"`;
+          } else if (errorCode === 'error_missing_scope') {
+            errorMessage = 'Missing permissions to upload emojis';
+          } else if (errorCode === 'not_authed' || errorCode === 'invalid_auth') {
+            errorMessage = 'Slack authentication failed. Please visit your Slack workspace and try again.';
+            console.error('Auth details:', {
+              tokenType: token ? token.substring(0, 4) : 'none',
+              tokenLength: token ? token.length : 0,
+              cookieLength: cookie ? cookie.length : 0,
+              hasTeamId: !!teamId,
+              hasXId: !!xId
+            });
+          } else if (errorCode) {
+            errorMessage = errorCode;
+          }
+          
+          sendResponse({ success: false, error: errorMessage });
+        }
+      } catch (error) {
+        console.error('Proxy upload failed:', error);
+        
+        // If the upload fails due to auth, suggest reconnecting
+        if (error.message && (error.message.includes('not_authed') || error.message.includes('invalid_auth'))) {
+          // Open a Slack tab to refresh authentication
+          const slackUrl = `https://${workspaceData.workspace}.slack.com/customize/emoji`;
+          chrome.tabs.create({ url: slackUrl }, (tab) => {
+            sendResponse({ 
+              success: false, 
+              error: 'Authentication expired. Please sign in to Slack and try again.',
+              needsReauth: true 
+            });
+          });
+        } else {
+          sendResponse({ success: false, error: 'Network error. Please check your connection.' });
+        }
+      }
+      
+      } catch (error) {
+        console.error('Error uploading emoji:', error);
+        sendResponse({ success: false, error: error.message || 'Upload failed' });
+      }
+    })();
+    
+    return true; // Keep channel open for async response
   }
   
   return true; // Keep message channel open for async response
@@ -547,15 +1109,49 @@ chrome.webRequest.onBeforeRequest.addListener(
         details.url.includes('/api/team.')) {
       
       
+      // Log the full request details for debugging
+      console.log('Intercepted Slack API request:', {
+        url: details.url,
+        method: details.method,
+        hasRequestBody: !!details.requestBody,
+        hasFormData: !!(details.requestBody && details.requestBody.formData),
+        formDataKeys: details.requestBody && details.requestBody.formData ? Object.keys(details.requestBody.formData) : []
+      });
+      
       // Extract token from form data if present
       let formToken = null;
       if (details.requestBody && details.requestBody.formData && details.requestBody.formData.token) {
         formToken = details.requestBody.formData.token[0];
+        console.log('✅ Extracted form token from request:', formToken ? formToken.substring(0, 15) + '...' : 'none');
+      } else {
+        console.log('❌ No token in form data');
+        
+        // Check all form data fields for debugging
+        if (details.requestBody && details.requestBody.formData) {
+          console.log('All form data fields:', details.requestBody.formData);
+          
+          // Check if token might be in other fields
+          for (const [key, value] of Object.entries(details.requestBody.formData)) {
+            if (value && value[0] && value[0].startsWith && value[0].startsWith('xox')) {
+              console.log(`Found token in field '${key}':`, value[0].substring(0, 15) + '...');
+              formToken = value[0];
+              break;
+            }
+          }
+        }
+      }
+      
+      // Also check for tokens in the URL
+      const urlMatch = details.url.match(/[?&]token=([^&]+)/);
+      if (urlMatch && !formToken) {
+        formToken = decodeURIComponent(urlMatch[1]);
+        console.log('Extracted token from URL:', formToken ? formToken.substring(0, 15) + '...' : 'none');
       }
       
       // Store the form token for this request
       if (formToken) {
-        pendingRequestData.set(details.requestId, { formToken });
+        pendingRequestData.set(details.requestId, { formToken, timestamp: Date.now() });
+        console.log('Stored form token for request:', details.requestId);
       }
       
       const tabId = details.tabId;
@@ -592,12 +1188,20 @@ chrome.webRequest.onSendHeaders.addListener(
       const requestData = pendingRequestData.get(details.requestId);
       const formToken = requestData ? requestData.formToken : null;
       
-      // Log important headers
+      // Log important headers for debugging
       if (headers.cookie) {
+        console.log('Captured cookie length:', headers.cookie.length);
+        // Check for xox tokens in cookie
+        const cookieTokenMatch = headers.cookie.match(/xox[a-zA-Z]-[^\s;]+/);
+        if (cookieTokenMatch) {
+          console.log('Found token in cookie:', cookieTokenMatch[0].substring(0, 15) + '...');
+        }
       }
       if (headers.authorization) {
+        console.log('Captured authorization header');
       }
       if (formToken) {
+        console.log('Captured form token:', formToken.substring(0, 15) + '...');
       }
       
       const tabId = details.tabId;

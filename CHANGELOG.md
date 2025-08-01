@@ -1,5 +1,259 @@
 # Changelog
 
+## [1.1.1] - 2025-02-01
+
+### UI/UX Improvements
+
+This release focuses on streamlining the user interface and improving the direct upload experience.
+
+### Changed
+- **Simplified Create Panel**: Removed the dual-button interface and streamlined to a single "Send to Slack" button
+- **Direct Upload Flow**: The primary button now uploads directly to Slack without showing additional dialog options
+- **Improved Button Layout**: Single full-width button provides better visual hierarchy and cleaner interface
+
+### Fixed
+- **Button Event Listeners**: Fixed timing issues where buttons weren't responding to clicks due to DOM loading order
+- **Event Handler Attachment**: Properly attach event listeners after buttons are created and visible
+- **Duplicate Listeners**: Prevented multiple event listeners from being attached to the same buttons
+
+### Technical Improvements
+- Moved event listener attachment to happen after button creation
+- Added data attributes to prevent duplicate event listener attachment
+- Cleaned up old duplicate code and improved code organization
+- Better error handling and debugging for button interactions
+
+## [1.1.0] - 2025-01-31
+
+### Major Release - Authentication Fixed
+
+This release resolves all authentication issues with connecting to the Emoji Studio app.
+
+### Key Improvements
+- ✅ Fixed "not_authed" error when syncing with Emoji Studio
+- ✅ Correctly captures and uses xoxc API tokens from Slack
+- ✅ Improved token prioritization (xoxc tokens over xoxd tokens)
+- ✅ Better error handling and user guidance
+- ✅ Enhanced debugging for troubleshooting
+
+### Features
+- Direct emoji upload to Slack from the extension
+- Drag and drop support for images and videos
+- Bulk emoji management with renaming
+- Seamless integration with Emoji Studio app
+- Cart system for collecting emojis before upload
+
+### Technical Improvements
+- Proper token extraction from Slack API requests
+- Persistent authentication storage
+- Multipart form data handling
+- Chrome extension best practices implementation
+
+## [1.0.19] - 2025-01-31
+
+### Fixed
+- Fixed token priority - now uses xoxc tokens from form data instead of xoxd tokens from cookies
+- The extension was capturing the correct token but using the wrong one
+- Prioritize formToken over cookie token for authentication
+
+### Improved
+- Better token selection logic
+- Debug logging shows which token is chosen
+
+## [1.0.18] - 2025-01-31
+
+### Fixed
+- Removed script injection that was interfering with token capture
+- Added comprehensive debugging for form data capture
+- Check all form data fields for tokens
+
+### Improved
+- Better logging of all API requests and form data
+- Show all form data fields when token is not found
+- More detailed debugging information
+
+## [1.0.17] - 2025-01-31
+
+### Fixed
+- Added comprehensive token search in Slack global variables
+- Improved debugging for token capture
+- Added periodic token checking
+- Search for tokens in boot_data and other Slack globals
+
+### Improved
+- Better logging to identify where tokens are stored
+- Multiple fallback methods to find tokens
+- Manual token check every 5 seconds
+
+## [1.0.16] - 2025-01-31
+
+### Fixed
+- Inject script to capture xoxc tokens from Slack API calls
+- Properly intercept fetch requests to extract tokens
+- Fixed "not_authed" error by capturing the correct token type
+
+### Added
+- Script injection to capture tokens directly from page context
+- Message passing to relay captured tokens to extension
+
+## [1.0.15] - 2025-01-31
+
+### Fixed
+- Fixed token extraction from Slack authentication
+- Added fallback to use formToken if main token is missing
+- Improved debugging for token capture
+- Store token directly in captured data
+
+### Improved
+- Better logging for authentication debugging
+- Handle both token and formToken fields
+- More robust token extraction from multiple sources
+
+## [1.0.14] - 2025-01-31
+
+### Fixed
+- Fixed "not_authed" error when connecting to Emoji Studio app
+- Curl command now matches exact format expected by Emoji Studio
+- Properly captures xId from both headers and URL
+- Multipart form data format matches Slack API requirements
+
+### Improved
+- Better xId extraction from multiple sources
+- Curl command includes all required headers
+- Form data boundary handling matches WebKit format
+
+## [1.0.13] - 2025-01-31
+
+### Fixed
+- Improved token extraction from Slack API requests
+- Added URL token extraction as fallback
+- Enhanced debugging for authentication issues
+- Better error messages when token is missing
+
+### Improved
+- More comprehensive token extraction from multiple sources
+- Debug logging to identify authentication problems
+- Clear guidance when users need to visit Slack workspace
+
+## [1.0.12] - 2025-01-31
+
+### Fixed
+- Fixed service worker syntax error with await in non-async context
+- Properly structured async code in upload handler
+
+## [1.0.11] - 2025-01-31
+
+### Fixed
+- Store Slack authentication as curl command for persistent auth (like Emoji Studio app)
+- Use stored authentication for uploads instead of requiring active Slack session
+- Parse stored curl command when uploading emojis
+
+### Improved
+- Authentication data is now stored persistently when visiting Slack emoji page
+- Uploads work even after browser restart using stored credentials
+- Better alignment with how Emoji Studio app handles authentication
+
+## [1.0.10] - 2025-01-31
+
+### Fixed
+- Improved authentication error handling with clearer user guidance
+- Added "Visit Slack" button when authentication fails
+- Stop bulk uploads immediately on authentication failure
+- Enhanced error messages to guide users through re-authentication
+
+### Improved
+- Better debugging for authentication issues
+- More comprehensive header capture for Slack API requests
+- Clear instructions when Slack session expires
+- User-friendly authentication failure recovery flow
+
+## [1.0.9] - 2025-01-31
+
+### Fixed
+- Fixed "not_authed" error by properly decoding URL-encoded tokens
+- Improved token extraction from cookies with URL decoding
+- Better handling of encoded form tokens
+
+### Improved
+- More robust token parsing with fallback strategies
+- Decode tokens from 'd' cookie before use
+- Handle both encoded and non-encoded token formats
+
+## [1.0.8] - 2025-01-31
+
+### Fixed
+- Fixed "Missing Slack authentication data" error during direct uploads
+- Improved authentication data capture to include all headers
+- Better token extraction from multiple sources (cookies, headers, form data)
+- More flexible authentication validation
+
+### Improved
+- Store full authentication headers for reliable uploads
+- Extract tokens from authorization headers, cookies, and form data
+- Preserve complete cookie header for API requests
+
+## [1.0.7] - 2025-01-31
+
+### Fixed
+- Fixed "Extension context invalidated" error on slackmojis.com
+- Added proper error handling for Chrome API calls
+- Added fallback UI elements when extension context is lost
+- Improved resilience when extension is reloaded or updated
+
+### Improved
+- Better error messages for users when extension needs to be refreshed
+- Graceful degradation with emoji fallbacks when logos can't load
+
+## [1.0.6] - 2025-01-31
+
+### Fixed
+- Fixed regex pattern error in emoji name validation
+- Fixed service worker registration error (Status code: 15)
+- Implemented true direct upload to Slack from the extension
+
+### Added
+- Direct emoji upload to Slack without leaving the extension
+- Automatic fallback mechanism that opens a Slack tab if needed
+- Smart upload strategy that works with or without an open Slack tab
+
+### Improved
+- Upload progress shows individual emoji status
+- Better error messages for specific failure cases
+- Rate limiting protection with delays between uploads
+
+## [1.0.5] - 2025-01-31
+
+### Added
+- Direct Slack upload functionality from the Create tab
+  - Upload emojis directly to Slack without leaving the extension
+  - Progress tracking for bulk uploads
+  - Detailed error reporting for failed uploads
+  - Choice between direct upload or opening in Emoji Studio app
+- Upload dialog with modern UI
+  - Shows workspace information
+  - Real-time progress bar
+  - Success/error summary
+  - Individual error details for failed uploads
+
+### Improved
+- Enhanced user workflow with two upload options
+- Better error handling and user feedback
+- Smooth animations and transitions
+
+## [1.0.3] - 2025-01-30
+
+### Added
+- HDR image handling support for Emoji Studio integration
+- Enhanced Slackmojis integration with "Add to Slack" functionality
+- Support for Slackmojis search results pages
+
+### Fixed
+- Fixed Slackmojis buttons not appearing on search results
+- Removed unnecessary console.log statements for cleaner production code
+
+### Improved
+- Updated extension distribution to Chrome Web Store
+- Code cleanup and performance optimizations
+
 ## [1.0.1] - 2025-01-28
 
 ### Changed
