@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.1] - 2025-08-05
+
+### Added
+- **Emoji Studio App Integration**: Emoji Studio app now fully supports receiving synced data from the extension
+- **Automatic Data Loading**: Emoji Studio automatically loads synced data when pages are opened
+- **Toast Notifications**: Success notifications show when data is synced to the app
+- **Universal Handler**: ChromeExtensionHandler component added to all pages for consistent sync support
+
+### Changed
+- ChromeExtensionHandler now processes synced data even when not coming directly from extension
+- Added processSyncedData callback to handle background sync data
+- Dashboard and Settings pages now include the ChromeExtensionHandler for data reception
+
+### Technical Improvements
+- Added SyncedEmojiData and SyncedEmojiMeta interfaces for type safety
+- Extension listener now supports three callbacks: auth data, clear data, and synced data
+- Improved error handling and logging throughout the sync process
+- Added automatic UI refresh when new emoji data is received
+
 ## [1.3.0] - 2025-08-05
 
 ### Added
