@@ -3,6 +3,26 @@ let pendingRequestData = new Map();
 let lastNotificationTime = {}; // Track last notification time per workspace
 let emojiCart = []; // Cart to store emojis before adding to Emoji Studio
 
+// Function to broadcast messages to all Emoji Studio tabs
+async function broadcastToEmojiStudioTabs(message) {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: ['https://app.emojistudio.xyz/*', 'https://emojistudio.xyz/*']
+    });
+    
+    for (const tab of tabs) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, message);
+      } catch (error) {
+        // Tab might not have content script loaded, ignore
+        console.log(`Could not send message to tab ${tab.id}:`, error.message);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to broadcast to Emoji Studio tabs:', error);
+  }
+}
+
 // Environment configuration
 const EMOJI_STUDIO_URLS = {
   development: 'http://localhost:3002',
@@ -281,13 +301,28 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
 
 // Function to sync data to Emoji Studio using Chrome Storage
 async function syncToEmojiStudio(isAutoSync = false) {
+  console.log('[syncToEmojiStudio] Starting sync, capturedData keys:', Object.keys(capturedData));
+  console.log('[syncToEmojiStudio] isAutoSync:', isAutoSync);
+  
   if (Object.keys(capturedData).length === 0) {
+    console.error('[syncToEmojiStudio] No captured data available for sync');
     return { success: false, error: 'No data to sync' };
   }
   
   const now = Date.now();
   const workspace = Object.keys(capturedData)[0];
   const dataToSend = capturedData[workspace];
+  
+  console.log('[syncToEmojiStudio] Syncing workspace:', workspace);
+  console.log('[syncToEmojiStudio] Data to send emoji count:', dataToSend.emojiCount);
+  console.log('[syncToEmojiStudio] Data to send emoji array length:', (dataToSend.emoji || []).length);
+  
+  // Broadcast sync start to all tabs
+  broadcastToEmojiStudioTabs({ 
+    type: 'SYNC_STARTED', 
+    workspace: workspace,
+    timestamp: now 
+  });
   
   // Update sync state
   await updateSyncState('syncing', now);
@@ -323,13 +358,26 @@ async function syncToEmojiStudio(isAutoSync = false) {
     // Update sync state to success
     await updateSyncState('success', now, now);
     
+    // Calculate non-alias emoji count for consistent display
+    const nonAliasCount = (dataToSend.emoji || []).filter(emoji => !emoji.is_alias).length;
+    
+    // Broadcast sync completion to all tabs
+    console.log('[syncToEmojiStudio] Broadcasting sync completion with total:', dataToSend.emojiCount || 0, 'non-alias:', nonAliasCount);
+    broadcastToEmojiStudioTabs({ 
+      type: 'SYNC_COMPLETED', 
+      workspace: workspace,
+      emojiCount: dataToSend.emojiCount || 0,
+      nonAliasCount: nonAliasCount,
+      timestamp: now 
+    });
+    
     // Show success notification only for manual syncs
     if (!isAutoSync) {
       chrome.notifications.create({
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: 'Emoji Studio Sync',
-        message: `Successfully synced ${dataToSend.emojiCount || 0} emojis!`
+        message: `Successfully synced ${nonAliasCount} emojis!`
       });
     }
     
@@ -359,6 +407,15 @@ async function syncToEmojiStudio(isAutoSync = false) {
   } catch (error) {
     console.error('Failed to sync to Chrome storage:', error);
     await updateSyncState('error', now);
+    
+    // Broadcast sync error to all tabs
+    broadcastToEmojiStudioTabs({ 
+      type: 'SYNC_ERROR', 
+      workspace: workspace,
+      error: error.message,
+      timestamp: now 
+    });
+    
     return { success: false, error: error.message };
   }
   
@@ -563,7 +620,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.type === 'CLEAR_DATA') {
     capturedData = {};
     emojiCart = [];
-    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData', 'emojiCart', 'slackCurlCommand']);
+    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData', 'emojiCart', 'slackCurlCommand', 'emojiStudioSyncData', 'emojiStudioSyncMeta']);
     chrome.action.setBadgeText({ text: '' });
     lastNotificationTime = {}; // Reset notification tracking
     
@@ -596,15 +653,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true; // Keep channel open for async response
   } else if (request.type === 'SYNC_TO_EMOJI_STUDIO_AND_OPEN') {
-    // Sync and then open Emoji Studio with loading parameter
-    syncToEmojiStudio(false).then(result => {
-      if (result.success) {
-        // Open Emoji Studio dashboard with a parameter to show loading
-        const emojiStudioUrl = getEmojiStudioUrl('/dashboard?syncing=true');
-        chrome.tabs.create({ url: emojiStudioUrl });
-      }
-      sendResponse({ success: result.success, error: result.error });
-    });
+    // Open Emoji Studio dashboard with sync parameter to indicate sync will start
+    const emojiStudioUrl = getEmojiStudioUrl('/dashboard?syncStarting=true');
+    chrome.tabs.create({ url: emojiStudioUrl });
+    
+    // Start sync after a short delay to ensure dashboard is ready for progress messages
+    setTimeout(() => {
+      syncToEmojiStudio(false).then(result => {
+        sendResponse({ success: result.success, error: result.error });
+      });
+    }, 1000); // 1 second delay
     return true; // Keep channel open for async response
   } else if (request.type === 'UPDATE_SYNC_SETTINGS') {
     // Update sync settings

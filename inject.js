@@ -31,9 +31,54 @@
   }
   
   // Check for synced data on page load with a small delay to ensure page is ready
-  setTimeout(() => {
-    checkForSyncedData();
-  }, 500);
+  // But don't auto-check if sync is starting (to avoid sending stale data)
+  const urlParams = new URLSearchParams(window.location.search);
+  const syncStarting = urlParams.get('syncStarting') === 'true';
+  
+  if (!syncStarting) {
+    setTimeout(() => {
+      checkForSyncedData();
+    }, 500);
+  } else {
+    console.log('[Inject] Sync is starting, skipping auto-check for synced data');
+  }
+  
+  // Listen for sync progress messages from background script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'SYNC_STARTED') {
+      console.log('[Inject] Sync started for workspace:', message.workspace);
+      window.postMessage({
+        type: 'EMOJI_STUDIO_SYNC_PROGRESS',
+        status: 'started',
+        workspace: message.workspace,
+        timestamp: message.timestamp
+      }, '*');
+    } else if (message.type === 'SYNC_COMPLETED') {
+      console.log('[Inject] Sync completed for workspace:', message.workspace);
+      window.postMessage({
+        type: 'EMOJI_STUDIO_SYNC_PROGRESS',
+        status: 'completed',
+        workspace: message.workspace,
+        emojiCount: message.emojiCount,
+        nonAliasCount: message.nonAliasCount,
+        timestamp: message.timestamp
+      }, '*');
+      
+      // Also check for updated synced data
+      setTimeout(() => {
+        checkForSyncedData();
+      }, 100);
+    } else if (message.type === 'SYNC_ERROR') {
+      console.log('[Inject] Sync error for workspace:', message.workspace, message.error);
+      window.postMessage({
+        type: 'EMOJI_STUDIO_SYNC_PROGRESS',
+        status: 'error',
+        workspace: message.workspace,
+        error: message.error,
+        timestamp: message.timestamp
+      }, '*');
+    }
+  });
   
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);

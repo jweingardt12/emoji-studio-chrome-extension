@@ -1,5 +1,84 @@
 # Changelog
 
+## [1.3.8] - 2025-08-05
+
+### Fixed
+- **Stale Data Loading**: Fixed issue where dashboard would load old/stale synced data before new sync completed
+- **Settings Redirect Bug**: Prevented automatic redirect to settings when sync starts
+- **Data Processing Race Condition**: inject.js now waits for sync to complete before sending data when syncStarting=true
+
+### Technical Improvements
+- Added extensive logging to sync process for better debugging
+- inject.js skips auto-check for synced data when sync is starting
+- Better handling of sync timing to prevent old data from interfering with new sync
+- Enhanced sync process logging for troubleshooting
+
+### Debug Improvements
+- Added detailed logging to syncToEmojiStudio function
+- Log captured data status, workspace, and emoji counts
+- Better visibility into sync completion broadcasting
+- More detailed error messages for sync failures
+
+## [1.3.7] - 2025-08-05
+
+### Fixed
+- **Sync Button Dashboard Opening**: Fixed issue where clicking sync button didn't open dashboard
+- **Loading Overlay During Sync**: Sync button now properly shows loading overlay during sync process
+- **Sync Flow Timing**: Improved timing to ensure dashboard loads before sync progress messages are sent
+
+### Technical Improvements
+- Updated SYNC_TO_EMOJI_STUDIO_AND_OPEN handler to open dashboard immediately with syncStarting parameter
+- Added 1-second delay between opening dashboard and starting sync to ensure proper message handling
+- ChromeExtensionHandler now detects syncStarting parameter and shows "Preparing to sync..." message
+- Better progress flow: Preparing (5%) → Syncing (20%) → Completed (90%) → Hide overlay
+
+## [1.3.6] - 2025-08-05
+
+### Fixed
+- **Clear App Data**: Fixed issue where "Clear App Data" button in settings wasn't properly clearing all data
+- **Extension Storage Cleanup**: CLEAR_DATA handler now properly removes synced data from extension storage
+- **Data Persistence**: Prevented automatic data restoration after clearing app data
+
+### Technical Improvements
+- Updated CLEAR_DATA handler to remove `emojiStudioSyncData` and `emojiStudioSyncMeta` keys
+- Fixed toast notifications in ClearLocalStorageButton to use sonner instead of shadcn toast
+- Improved clear data flow to prevent race conditions with automatic data restoration
+
+## [1.3.5] - 2025-08-05
+
+### Added
+- **Real-time Sync Progress**: Loading overlay now shows actual sync progress instead of simulated progress
+- **Live Sync Communication**: Extension broadcasts sync status to all open Emoji Studio tabs
+- **Smart Loading States**: Loading overlay automatically appears during sync and disappears when complete
+
+### Fixed
+- **Accurate Progress Tracking**: Removed fake progress simulation, now tracks real sync operations
+- **Duplicate Loading Overlays**: Fixed issue where multiple loading overlays could appear simultaneously
+- **State Synchronization**: Loading overlay state properly synchronized with actual sync operations
+
+### Technical Improvements
+- Added broadcastToEmojiStudioTabs function for message passing
+- Enhanced inject.js to relay sync progress messages to React app
+- Updated ChromeExtensionHandler to listen for real-time sync progress
+- Simplified dashboard sync loading by removing URL parameter dependency
+- Message passing architecture for SYNC_STARTED, SYNC_COMPLETED, and SYNC_ERROR events
+
+## [1.3.4] - 2025-08-05
+
+### Fixed (Debug Release)
+- **Critical Issue Investigation**: Reverted emoji count from 20,000 back to 5,000 to isolate sync failure
+- **Enhanced Debugging**: Added extensive logging to identify why "no emojis found" occurs despite workspace connection
+- **API Error Tracking**: Improved error handling and response logging for Slack API calls
+
+### Technical Improvements
+- Added detailed console logging for fetchFreshEmojiData function
+- Enhanced error messages with HTTP status codes and response bodies
+- Simplified request parameters to match known working configuration
+- Full request/response debugging for troubleshooting
+
+### Status
+This is a debugging release to identify the root cause of sync failure. The emoji count limit has been temporarily reverted while investigating the issue.
+
 ## [1.3.3] - 2025-08-05
 
 ### Fixed
