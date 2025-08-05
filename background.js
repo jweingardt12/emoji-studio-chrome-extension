@@ -193,6 +193,89 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 
+// Function to fetch fresh emoji data directly from Slack
+async function fetchFreshEmojiData(workspace, workspaceData) {
+  try {
+    console.log('Fetching fresh emoji data from Slack...');
+    
+    // Build the API URL
+    const apiUrl = `https://${workspace}.slack.com/api/emoji.adminList`;
+    
+    // Prepare the request body
+    const params = new URLSearchParams({
+      token: workspaceData.token || workspaceData.formToken,
+      count: 5000,
+      _x_reason: 'customize-emoji-list',
+      _x_mode: 'online'
+    });
+    
+    // Make the API request
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'Origin': `https://${workspace}.slack.com`,
+        'Referer': `https://${workspace}.slack.com/customize/emoji`,
+        'Cookie': workspaceData.cookie || ''
+      },
+      body: params.toString()
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.ok) {
+      // Update the captured data with fresh emoji list
+      const freshData = {
+        ...workspaceData,
+        emoji: data.emoji || [],
+        emojiCount: (data.emoji || []).length,
+        lastFetchTime: new Date().toISOString()
+      };
+      
+      // Store the fresh data
+      capturedData[workspace] = freshData;
+      await chrome.storage.local.set({ 
+        slackData: capturedData,
+        lastFetchTime: Date.now()
+      });
+      
+      console.log(`Fetched ${freshData.emojiCount} emojis from Slack`);
+      
+      // Notify popup that data was updated
+      chrome.runtime.sendMessage({ type: 'DATA_UPDATED' }).catch(() => {});
+      
+      return { 
+        success: true, 
+        emojiCount: freshData.emojiCount,
+        message: `Fetched ${freshData.emojiCount} emojis` 
+      };
+    } else {
+      throw new Error(data.error || 'Failed to fetch emoji data');
+    }
+  } catch (error) {
+    console.error('Failed to fetch fresh emoji data:', error);
+    
+    // If token expired, we might need to re-authenticate
+    if (error.message && (error.message.includes('invalid_auth') || error.message.includes('not_authed'))) {
+      return { 
+        success: false, 
+        error: 'Authentication expired. Please visit Slack emoji page to re-authenticate.',
+        needsReauth: true 
+      };
+    }
+    
+    return { 
+      success: false, 
+      error: error.message || 'Failed to fetch data' 
+    };
+  }
+}
+
 // Function to sync data to Emoji Studio using Chrome Storage
 async function syncToEmojiStudio(isAutoSync = false) {
   if (Object.keys(capturedData).length === 0) {
@@ -548,6 +631,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           syncState: 'idle'
         }
       });
+    });
+    return true;
+  } else if (request.type === 'FETCH_FRESH_DATA') {
+    // Fetch fresh emoji data directly from Slack API
+    const workspace = Object.keys(capturedData)[0];
+    if (!workspace || !capturedData[workspace]) {
+      sendResponse({ success: false, error: 'No workspace data available' });
+      return true;
+    }
+    
+    const workspaceData = capturedData[workspace];
+    fetchFreshEmojiData(workspace, workspaceData).then(result => {
+      sendResponse(result);
     });
     return true;
   } else if (request.type === 'GET_EMOJI_STUDIO_DATA') {

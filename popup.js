@@ -441,76 +441,75 @@ async function initializeSyncTab() {
     return true;
   });
   
-  // Refresh Data button - fetches fresh data from Slack
+  // Refresh Data button - fetches fresh data from Slack API directly
   refreshButton.addEventListener('click', async () => {
     if (Object.keys(capturedData).length === 0) return;
     
-    const workspace = Object.keys(capturedData)[0];
-    
-    // Show fetching status
-    syncStatusIndicator.style.display = 'inline-block';
-    syncStatusIndicator.classList.remove('success', 'error');
-    syncStatusIndicator.classList.add('syncing');
-    syncStatusMessage.textContent = 'Fetching fresh data...';
-    
-    // Open Slack emoji page to capture fresh data
-    const slackUrl = `https://${workspace}.slack.com/customize/emoji`;
-    
-    // Listen for data update
-    const dataUpdateListener = (request, sender, sendResponse) => {
-      if (request.type === 'DATA_UPDATED') {
-        // Data has been captured, now sync it
+    try {
+      // Show fetching status
+      syncStatusIndicator.style.display = 'inline-block';
+      syncStatusIndicator.classList.remove('success', 'error');
+      syncStatusIndicator.classList.add('syncing');
+      syncStatusMessage.textContent = 'Fetching fresh data...';
+      
+      // Fetch fresh data directly from Slack API
+      const fetchResponse = await chrome.runtime.sendMessage({ type: 'FETCH_FRESH_DATA' });
+      
+      if (fetchResponse.success) {
+        // Data fetched successfully, now sync to Emoji Studio
         syncStatusMessage.textContent = 'Syncing to Emoji Studio...';
         
-        // Sync the fresh data
-        chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' }).then(response => {
-          if (response.success) {
-            syncStatusIndicator.classList.remove('syncing', 'error');
-            syncStatusIndicator.classList.add('success');
-            syncStatusMessage.textContent = 'Data refreshed!';
-            
-            // Reload data and update UI
-            loadDataFromStorage().then(() => {
-              if (updateUIFunction) updateUIFunction();
-            });
-            
-            // Clear message after 3 seconds
-            setTimeout(() => {
-              syncStatusIndicator.style.display = 'none';
-              syncStatusMessage.textContent = '';
-            }, 3000);
-          } else {
-            syncStatusIndicator.classList.remove('syncing', 'success');
-            syncStatusIndicator.classList.add('error');
-            syncStatusMessage.textContent = 'Sync failed';
-          }
-        });
+        const syncResponse = await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
         
-        // Remove this listener
-        chrome.runtime.onMessage.removeListener(dataUpdateListener);
-      }
-    };
-    
-    // Add listener for data updates
-    chrome.runtime.onMessage.addListener(dataUpdateListener);
-    
-    // Open the Slack page to trigger data capture
-    chrome.tabs.create({ url: slackUrl, active: false }, (tab) => {
-      // Close the tab after 5 seconds (enough time to capture data)
-      setTimeout(() => {
-        chrome.tabs.remove(tab.id);
-      }, 5000);
-    });
-    
-    // Timeout after 10 seconds if no data received
-    setTimeout(() => {
-      chrome.runtime.onMessage.removeListener(dataUpdateListener);
-      if (syncStatusMessage.textContent === 'Fetching fresh data...') {
+        if (syncResponse.success) {
+          syncStatusIndicator.classList.remove('syncing', 'error');
+          syncStatusIndicator.classList.add('success');
+          syncStatusMessage.textContent = `Refreshed ${fetchResponse.emojiCount} emojis!`;
+          
+          // Reload data and update UI
+          await loadDataFromStorage();
+          await updateUI();
+          
+          // Clear message after 3 seconds
+          setTimeout(() => {
+            syncStatusIndicator.style.display = 'none';
+            syncStatusMessage.textContent = '';
+          }, 3000);
+        } else {
+          syncStatusIndicator.classList.remove('syncing', 'success');
+          syncStatusIndicator.classList.add('error');
+          syncStatusMessage.textContent = 'Sync failed';
+        }
+      } else {
         syncStatusIndicator.classList.remove('syncing', 'success');
         syncStatusIndicator.classList.add('error');
-        syncStatusMessage.textContent = 'Failed to fetch data';
+        
+        if (fetchResponse.needsReauth) {
+          syncStatusMessage.textContent = 'Please re-authenticate';
+          // Open Slack emoji page for re-authentication
+          const workspace = Object.keys(capturedData)[0];
+          chrome.tabs.create({ url: `https://${workspace}.slack.com/customize/emoji` });
+        } else {
+          syncStatusMessage.textContent = fetchResponse.error || 'Failed to fetch data';
+        }
+        
+        // Clear error message after 5 seconds
+        setTimeout(() => {
+          syncStatusIndicator.style.display = 'none';
+          syncStatusMessage.textContent = '';
+        }, 5000);
       }
-    }, 10000);
+    } catch (error) {
+      console.error('Refresh error:', error);
+      syncStatusIndicator.classList.remove('syncing', 'success');
+      syncStatusIndicator.classList.add('error');
+      syncStatusMessage.textContent = 'Refresh failed';
+      
+      setTimeout(() => {
+        syncStatusIndicator.style.display = 'none';
+        syncStatusMessage.textContent = '';
+      }, 3000);
+    }
   });
   
   // Open Emoji Studio button
