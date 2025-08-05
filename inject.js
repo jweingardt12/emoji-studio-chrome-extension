@@ -1,8 +1,52 @@
 // This script will be injected into Emoji Studio pages to establish communication
 (function() {
+  console.log('[Emoji Studio Extension] Inject script loaded');
+  
   // Check if chrome.storage is available
   if (typeof chrome === 'undefined' || !chrome.storage) {
+    console.log('[Emoji Studio Extension] Chrome API not available');
     return;
+  }
+  
+  // Wait for DOM to be ready before marking extension
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', markExtensionInstalled);
+  } else {
+    markExtensionInstalled();
+  }
+  
+  function markExtensionInstalled() {
+    // Mark extension as installed (multiple ways for reliability)
+    window.__EMOJI_STUDIO_EXTENSION__ = true;
+    console.log('[Emoji Studio Extension] Marked window.__EMOJI_STUDIO_EXTENSION__ = true');
+    
+    // Also dispatch an event to notify the page
+    const version = chrome.runtime.getManifest().version;
+    window.dispatchEvent(new CustomEvent('emoji-studio-extension-installed', { 
+      detail: { version: version }
+    }));
+    console.log('[Emoji Studio Extension] Dispatched emoji-studio-extension-installed event with version:', version);
+    
+    // Also post a message for good measure
+    window.postMessage({
+      type: 'EMOJI_STUDIO_EXTENSION_INSTALLED',
+      version: version
+    }, '*');
+    
+    // Send the message a few more times to ensure it's received
+    setTimeout(() => {
+      window.postMessage({
+        type: 'EMOJI_STUDIO_EXTENSION_INSTALLED',
+        version: version
+      }, '*');
+    }, 100);
+    
+    setTimeout(() => {
+      window.postMessage({
+        type: 'EMOJI_STUDIO_EXTENSION_INSTALLED',
+        version: version
+      }, '*');
+    }, 500);
   }
   
   // Function to check for synced data from extension storage
@@ -45,7 +89,14 @@
   
   // Listen for sync progress messages from background script
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'SYNC_STARTED') {
+    if (message.type === 'TRACK_EVENT') {
+      // Forward tracking event to Emoji Studio
+      window.postMessage({
+        type: 'EXTENSION_TRACK_EVENT',
+        eventName: message.eventName,
+        properties: message.properties
+      }, '*');
+    } else if (message.type === 'SYNC_STARTED') {
       console.log('[Inject] Sync started for workspace:', message.workspace);
       window.postMessage({
         type: 'EMOJI_STUDIO_SYNC_PROGRESS',
@@ -251,6 +302,13 @@
     } else if (event.data.type === 'EMOJI_STUDIO_CLEAR_DATA') {
       // Forward to background script to clear extension data
       chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
+    } else if (event.data.type === 'UPDATE_NOTIFICATION_SETTINGS') {
+      // Forward notification settings to background script
+      console.log('[Inject] Forwarding notification settings to extension');
+      chrome.runtime.sendMessage({ 
+        type: 'UPDATE_NOTIFICATION_SETTINGS',
+        settings: event.data.settings
+      });
     } else if (event.data.type === 'REQUEST_EXTENSION_SYNC_DATA') {
       // Emoji Studio requesting synced data
       console.log('[Inject] Emoji Studio requesting synced data');

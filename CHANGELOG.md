@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.0] - 2025-08-05
+
+### Added
+- **New Emoji Notifications**: Get browser notifications when new emojis are added to your Slack workspace
+  - Native browser notifications (no extension required for notifications)
+  - Configurable notification settings in Emoji Studio Settings page
+  - Choose notification frequency: hourly, daily, or weekly
+  - Set preferred notification time
+  - Click notifications to view new emojis in Explorer with visual highlights
+- **Explorer Date Filtering**: Support for filtering emojis by creation date via URL parameter
+  - New emojis are highlighted with a "New" badge and special styling
+  - Clear filter button to return to full emoji list
+- **Settings Page Redesign**: Organized settings into tabs for better UX
+  - Connection, Notifications, Preferences, and Data tabs
+  - Cleaner, more organized interface
+  - Responsive tab design for mobile
+
+### Technical Improvements
+- Native browser Notification API for simpler, more reliable notifications
+- Background checks run in the web app when tab is open
+- Notification permission handling with clear user feedback
+- Test notification button to verify setup
+
 ## [1.3.9] - 2025-08-05
 
 ### Fixed

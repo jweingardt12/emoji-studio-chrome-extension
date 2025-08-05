@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Emoji Studio for Slack",
-  "version": "1.2.5",
+  "version": "1.4.0",
   "description": "Sync Slack emojis to Emoji Studio, create custom emojis from any image/video, and manage your workspace's emoji collection.",
   "permissions": [
     "storage",
@@ -16,7 +16,9 @@
     "https://*.slack.com/*",
     "https://app.emojistudio.xyz/*",
     "https://emojistudio.xyz/*",
-    "https://*.slackmojis.com/*"
+    "https://*.slackmojis.com/*",
+    "http://localhost:3001/*",
+    "http://localhost:3002/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
@@ -31,7 +33,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://app.emojistudio.xyz/*", "https://emojistudio.xyz/*"],
+      "matches": ["https://app.emojistudio.xyz/*", "https://emojistudio.xyz/*", "http://localhost:3001/*", "http://localhost:3002/*"],
       "js": ["inject.js"],
       "run_at": "document_idle"
     },

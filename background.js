@@ -2,6 +2,32 @@ let capturedData = {};
 let pendingRequestData = new Map();
 let lastNotificationTime = {}; // Track last notification time per workspace
 let emojiCart = []; // Cart to store emojis before adding to Emoji Studio
+let lastEmojiCheckData = {}; // Track last emoji check data for new emoji detection
+
+// Simple analytics tracking function
+async function trackEvent(eventName, properties = {}) {
+  try {
+    // Send event to all open Emoji Studio tabs for tracking
+    const tabs = await chrome.tabs.query({
+      url: ['https://app.emojistudio.xyz/*', 'https://emojistudio.xyz/*', 'http://localhost:3001/*', 'http://localhost:3002/*']
+    });
+    
+    for (const tab of tabs) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, {
+          type: 'TRACK_EVENT',
+          eventName: eventName,
+          properties: properties
+        });
+        break; // Only need to send to one tab
+      } catch (error) {
+        // Tab might not have content script loaded, ignore
+      }
+    }
+  } catch (error) {
+    // Silent fail - analytics shouldn't break functionality
+  }
+}
 
 // Function to broadcast messages to all Emoji Studio tabs
 async function broadcastToEmojiStudioTabs(message) {
@@ -50,6 +76,148 @@ function getEmojiStudioUrl(path = '') {
 // Track pending sync to avoid multiple simultaneous syncs
 let pendingSyncTimeout = null;
 let syncScheduled = false;
+
+// Function to check for new emojis and show notification
+async function checkForNewEmojis() {
+  try {
+    // First check if we have notification permission
+    const permissionGranted = await chrome.notifications.getPermissionLevel();
+    if (permissionGranted !== 'granted') {
+      console.log('[Notifications] Permission not granted:', permissionGranted);
+      return;
+    }
+    
+    // Get notification settings
+    const { notificationSettings, lastEmojiCheck } = await chrome.storage.local.get(['notificationSettings', 'lastEmojiCheck']);
+    
+    if (!notificationSettings?.enabled) {
+      console.log('[Notifications] Emoji notifications disabled');
+      return;
+    }
+
+    // Get current workspace data
+    const { slackData } = await chrome.storage.local.get('slackData');
+    if (!slackData || Object.keys(slackData).length === 0) {
+      console.log('[Notifications] No workspace data available');
+      return;
+    }
+
+    const workspace = Object.keys(slackData)[0];
+    const workspaceData = slackData[workspace];
+    
+    if (!workspaceData?.emojis) {
+      console.log('[Notifications] No emoji data available');
+      return;
+    }
+
+    // Get previous emoji list
+    const previousEmojis = lastEmojiCheck?.[workspace]?.emojis || {};
+    const currentEmojis = workspaceData.emojis;
+    
+    // Find new emojis (emojis that exist now but didn't exist before)
+    const newEmojiNames = [];
+    const now = Date.now() / 1000; // Current time in seconds
+    const checkWindow = notificationSettings.checkWindow || 86400; // Default 24 hours
+    
+    for (const [name, data] of Object.entries(currentEmojis)) {
+      if (!previousEmojis[name]) {
+        // Check if emoji was created within our check window
+        if (data.created && (now - data.created) < checkWindow) {
+          newEmojiNames.push(name);
+        }
+      }
+    }
+
+    // Store current state for next check
+    await chrome.storage.local.set({
+      lastEmojiCheck: {
+        [workspace]: {
+          emojis: currentEmojis,
+          lastChecked: now
+        }
+      }
+    });
+
+    // Show notification if new emojis found
+    if (newEmojiNames.length > 0) {
+      const notificationId = `new-emojis-${Date.now()}`;
+      const message = newEmojiNames.length === 1 
+        ? `New emoji added: :${newEmojiNames[0]}:`
+        : `${newEmojiNames.length} new emojis added to Slack`;
+      
+      chrome.notifications.create(notificationId, {
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'New Emojis in Slack!',
+        message: message,
+        buttons: [{ title: 'View in Emoji Studio' }],
+        requireInteraction: false
+      });
+
+      // Store notification data for click handler
+      await chrome.storage.local.set({
+        [`notification_${notificationId}`]: {
+          type: 'new_emojis',
+          count: newEmojiNames.length,
+          emojis: newEmojiNames,
+          timestamp: now
+        }
+      });
+
+      console.log(`[Notifications] Showed notification for ${newEmojiNames.length} new emojis`);
+      
+      // Track notification shown
+      trackEvent('Extension: New Emoji Notification Shown', {
+        emojiCount: newEmojiNames.length,
+        workspace: workspace,
+        emojis: newEmojiNames.slice(0, 5) // Only track first 5 for privacy
+      });
+    } else {
+      console.log('[Notifications] No new emojis found');
+    }
+  } catch (error) {
+    console.error('[Notifications] Error checking for new emojis:', error);
+  }
+}
+
+// Schedule emoji check based on user settings
+function scheduleEmojiCheck() {
+  chrome.storage.local.get('notificationSettings', (result) => {
+    const settings = result.notificationSettings;
+    
+    if (!settings?.enabled) {
+      // Clear any existing alarm
+      chrome.alarms.clear('checkNewEmojis');
+      return;
+    }
+
+    // Set up alarm based on frequency
+    const frequency = settings.frequency || 'daily';
+    let periodInMinutes;
+    
+    switch (frequency) {
+      case 'hourly':
+        periodInMinutes = 60;
+        break;
+      case 'daily':
+        periodInMinutes = 1440; // 24 hours
+        break;
+      case 'weekly':
+        periodInMinutes = 10080; // 7 days
+        break;
+      default:
+        periodInMinutes = 1440;
+    }
+
+    // Create or update alarm
+    chrome.alarms.create('checkNewEmojis', {
+      delayInMinutes: 1, // Check immediately on first run
+      periodInMinutes: periodInMinutes
+    });
+    
+    console.log(`[Notifications] Scheduled emoji check: ${frequency} (every ${periodInMinutes} minutes)`);
+  });
+}
 
 // Schedule a debounced sync after uploads
 function scheduleBackgroundSync(workspace, delayMs = 3000) {
@@ -162,6 +330,9 @@ chrome.runtime.onInstalled.addListener(() => {
     delayInMinutes: 1 // Start checking after 1 minute
   });
   
+  // Schedule emoji notifications check
+  scheduleEmojiCheck();
+  
   // Load existing data from storage
   chrome.storage.local.get(['slackData', 'emojiCart', 'syncSettings'], (result) => {
     if (result.slackData) {
@@ -197,7 +368,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // Also load data on startup (not just on install)
-chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand', 'syncSettings'], (result) => {
+chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand', 'syncSettings', 'notificationSettings'], (result) => {
   console.log('Loading data on startup:', result);
   if (result.slackData) {
     capturedData = result.slackData;
@@ -218,6 +389,12 @@ chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand', 'syncSet
   } else {
     emojiCart = [];
     console.log('No cart found, initialized empty cart');
+  }
+  
+  // Schedule emoji notification check if settings exist
+  if (result.notificationSettings) {
+    console.log('Found notification settings, scheduling check');
+    scheduleEmojiCheck();
   }
   
   // Check sync settings and possibly recreate alarm with correct interval
@@ -246,7 +423,10 @@ chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand', 'syncSet
 
 // Handle alarm events
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'autoSync') {
+  if (alarm.name === 'checkNewEmojis') {
+    console.log('[Notifications] Running scheduled emoji check');
+    await checkForNewEmojis();
+  } else if (alarm.name === 'autoSync') {
     console.log('Auto-sync alarm triggered');
     
     // Check if auto-sync is enabled
@@ -691,7 +871,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.type === 'CLEAR_DATA') {
     capturedData = {};
     emojiCart = [];
-    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData', 'emojiCart', 'slackCurlCommand', 'emojiStudioSyncData', 'emojiStudioSyncMeta']);
+    lastEmojiCheckData = {};
+    chrome.storage.local.remove(['slackData', 'lastSyncTime', 'pendingExtensionData', 'emojiCart', 'slackCurlCommand', 'emojiStudioSyncData', 'emojiStudioSyncMeta', 'lastEmojiCheck', 'notificationSettings']);
     chrome.action.setBadgeText({ text: '' });
     lastNotificationTime = {}; // Reset notification tracking
     
@@ -2121,3 +2302,97 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // Initial context menu update
 setTimeout(updateContextMenu, 1000);
+
+// Handle notification clicks
+chrome.notifications.onClicked.addListener(async (notificationId) => {
+  console.log('[Notifications] Notification clicked:', notificationId);
+  
+  if (notificationId.startsWith('new-emojis-')) {
+    // Get notification data
+    const storageKey = `notification_${notificationId}`;
+    const { [storageKey]: notificationData } = await chrome.storage.local.get(storageKey);
+    
+    if (notificationData) {
+      // Track notification click
+      trackEvent('Extension: New Emoji Notification Clicked', {
+        emojiCount: notificationData.count,
+        source: 'notification_body'
+      });
+      
+      // Open Emoji Studio Explorer with filter for recent emojis
+      const timestamp = notificationData.timestamp || Date.now() / 1000;
+      const explorerUrl = getEmojiStudioUrl(`/explorer?since=${Math.floor(timestamp - 86400)}`); // Show last 24 hours
+      
+      chrome.tabs.create({ url: explorerUrl });
+      
+      // Clean up notification data
+      chrome.storage.local.remove(storageKey);
+    }
+    
+    // Clear the notification
+    chrome.notifications.clear(notificationId);
+  }
+});
+
+// Handle notification button clicks
+chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
+  console.log('[Notifications] Notification button clicked:', notificationId, buttonIndex);
+  
+  if (notificationId.startsWith('new-emojis-') && buttonIndex === 0) {
+    // "View in Emoji Studio" button clicked
+    const storageKey = `notification_${notificationId}`;
+    const { [storageKey]: notificationData } = await chrome.storage.local.get(storageKey);
+    
+    if (notificationData) {
+      // Track button click
+      trackEvent('Extension: New Emoji Notification Clicked', {
+        emojiCount: notificationData.count,
+        source: 'notification_button'
+      });
+      
+      const timestamp = notificationData.timestamp || Date.now() / 1000;
+      const explorerUrl = getEmojiStudioUrl(`/explorer?since=${Math.floor(timestamp - 86400)}`);
+      
+      chrome.tabs.create({ url: explorerUrl });
+      
+      // Clean up notification data
+      chrome.storage.local.remove(storageKey);
+    }
+    
+    // Clear the notification
+    chrome.notifications.clear(notificationId);
+  }
+});
+
+// Listen for notification settings changes and test notifications
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'UPDATE_NOTIFICATION_SETTINGS') {
+    console.log('[Notifications] Settings updated:', request.settings);
+    
+    // Store settings
+    chrome.storage.local.set({ notificationSettings: request.settings }, () => {
+      // Reschedule alarm based on new settings
+      scheduleEmojiCheck();
+      sendResponse({ success: true });
+    });
+    
+    return true; // Keep channel open for async response
+  } else if (request.type === 'TEST_NOTIFICATION') {
+    console.log('[Notifications] Sending test notification');
+    
+    // Create a test notification
+    chrome.notifications.create(`test-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Test Notification',
+      message: 'Emoji notifications are working! You\'ll be notified when new emojis are added to your Slack workspace.',
+      buttons: [{ title: 'Awesome!' }],
+      requireInteraction: false
+    }, (notificationId) => {
+      console.log('[Notifications] Test notification created:', notificationId);
+      sendResponse({ success: true });
+    });
+    
+    return true; // Keep channel open for async response
+  }
+});
