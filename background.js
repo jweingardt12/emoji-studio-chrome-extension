@@ -47,6 +47,47 @@ function getEmojiStudioUrl(path = '') {
 // Service workers in Manifest V3 should be allowed to go idle
 // The browser will wake them up when needed for events
 
+// Track pending sync to avoid multiple simultaneous syncs
+let pendingSyncTimeout = null;
+let syncScheduled = false;
+
+// Schedule a debounced sync after uploads
+function scheduleBackgroundSync(workspace, delayMs = 3000) {
+  // Clear any existing scheduled sync
+  if (pendingSyncTimeout) {
+    clearTimeout(pendingSyncTimeout);
+  }
+  
+  // Schedule a new sync
+  console.log(`[Sync] Scheduling background sync in ${delayMs}ms...`);
+  pendingSyncTimeout = setTimeout(async () => {
+    if (workspace && capturedData[workspace]) {
+      console.log('[Sync] Executing scheduled background sync...');
+      try {
+        // Fetch fresh data
+        const freshResult = await fetchFreshEmojiData(workspace, capturedData[workspace]);
+        if (freshResult.success) {
+          console.log('[Sync] Fresh data fetched, syncing to Emoji Studio...');
+          // Sync to Emoji Studio
+          const syncResult = await syncToEmojiStudio(true);
+          if (syncResult.success) {
+            console.log('[Sync] Background sync completed successfully');
+          } else {
+            console.warn('[Sync] Background sync failed:', syncResult.error);
+          }
+        } else {
+          console.warn('[Sync] Failed to fetch fresh data:', freshResult.error);
+        }
+      } catch (error) {
+        console.error('[Sync] Background sync error:', error);
+      }
+    }
+    pendingSyncTimeout = null;
+    syncScheduled = false;
+  }, delayMs);
+  syncScheduled = true;
+}
+
 // Simple parseSlackCurl function to extract auth data from curl command
 function parseSlackCurl(curlCommand) {
   if (!curlCommand) {
@@ -1418,6 +1459,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log('Upload result:', result);
         
         if (result.success && result.data && result.data.ok) {
+          // Schedule a background sync to fetch the new emoji
+          console.log('[Upload] Emoji uploaded successfully, scheduling background sync...');
+          
+          const workspace = workspaceData.workspace;
+          if (workspace) {
+            // Schedule sync with 3 second delay (will be debounced if multiple uploads)
+            scheduleBackgroundSync(workspace, 3000);
+          }
+          
           sendResponse({ success: true, emojiName: emoji.name });
         } else {
           // Handle error cases

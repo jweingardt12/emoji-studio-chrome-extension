@@ -649,9 +649,14 @@ function initializeCreateTab() {
     }
   }
   
-  // Clear all emojis
+  // Clear all emojis - Remove existing listeners first to avoid duplicates
   if (clearAllButton) {
-    clearAllButton.addEventListener('click', async () => {
+    // Clone node to remove all existing listeners
+    const newClearButton = clearAllButton.cloneNode(true);
+    clearAllButton.parentNode.replaceChild(newClearButton, clearAllButton);
+    
+    // Add the click listener to the new button
+    newClearButton.addEventListener('click', async () => {
       if (confirm('Clear all emojis?')) {
         try {
           await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
@@ -816,73 +821,130 @@ function initializeCreateTab() {
     
     let processedCount = 0;
     let errorCount = 0;
+    const totalFiles = validFiles.length;
+    let filesProcessed = 0;
     
-    // Process each file
-    for (const file of validFiles) {
-      // Check file size (limit to 10MB for data URLs)
-      if (file.size > 10 * 1024 * 1024) {
-        console.warn(`File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
-        errorCount++;
-        continue;
-      }
-      
-      const reader = new FileReader();
-      
-      reader.onload = async (e) => {
-        const dataUrl = e.target.result;
-        
-        // Generate a name from the filename
-        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
-        const emojiName = nameWithoutExt
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]/g, '_')
-          .replace(/_+/g, '_')
-          .substring(0, 30);
-        
-        // Add to cart
-        const result = await chrome.runtime.sendMessage({
-          type: 'ADD_TO_EMOJI_CART',
-          emoji: {
-            name: emojiName,
-            url: dataUrl,
-            source: 'local upload',
-            workspace: 'local',
-            isLocal: true,
-            mimeType: file.type,
-            fileSize: file.size
-          }
-        });
-        
-        if (result.success) {
-          processedCount++;
-        } else {
+    // Create a promise for each file processing
+    const processPromises = validFiles.map(file => {
+      return new Promise((resolve) => {
+        // Check file size (limit to 10MB for data URLs)
+        if (file.size > 10 * 1024 * 1024) {
+          console.warn(`File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
           errorCount++;
+          filesProcessed++;
+          resolve();
+          return;
         }
-      };
-      
-      reader.onerror = () => {
-        console.error(`Failed to read file ${file.name}`);
-        errorCount++;
-      };
-      
-      reader.readAsDataURL(file);
-    }
+        
+        const reader = new FileReader();
+        
+        reader.onload = async (e) => {
+          const dataUrl = e.target.result;
+          
+          // Generate a name from the filename
+          const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+          const emojiName = nameWithoutExt
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '_')
+            .replace(/_+/g, '_')
+            .substring(0, 30);
+          
+          // Add to cart
+          const result = await chrome.runtime.sendMessage({
+            type: 'ADD_TO_EMOJI_CART',
+            emoji: {
+              name: emojiName,
+              url: dataUrl,
+              source: 'local upload',
+              workspace: 'local',
+              isLocal: true,
+              mimeType: file.type,
+              fileSize: file.size
+            }
+          });
+          
+          if (result.success) {
+            processedCount++;
+          } else {
+            errorCount++;
+            console.log('Failed to add emoji:', result.error);
+          }
+          filesProcessed++;
+          resolve();
+        };
+        
+        reader.onerror = () => {
+          console.error(`Failed to read file ${file.name}`);
+          errorCount++;
+          filesProcessed++;
+          resolve();
+        };
+        
+        reader.readAsDataURL(file);
+      });
+    });
     
-    // Wait a bit for all files to process
-    setTimeout(() => {
-      loadEmojis(); // Reload to show the new emojis
-      
-      if (processedCount > 0 && errorCount === 0) {
-        // Show success briefly
-        createSuccessMessage.textContent = `${processedCount} file${processedCount > 1 ? 's' : ''} added!`;
-        createSuccessMessage.style.display = 'flex';
-        setTimeout(() => {
-          createSuccessMessage.style.display = 'none';
-        }, 2000);
+    // Wait for all files to be processed
+    await Promise.all(processPromises);
+    
+    // Now all files are processed, show results
+    loadEmojis(); // Reload to show the new emojis
+    
+    const createSuccessMessage = document.getElementById('createSuccessMessage');
+    const createSuccessText = document.getElementById('createSuccessText');
+    const createErrorMessage = document.getElementById('createErrorMessage');
+    const createErrorText = document.getElementById('createErrorText');
+    
+    if (processedCount > 0 && errorCount === 0) {
+        // Show success message
+        if (createSuccessMessage && createSuccessText) {
+          createSuccessText.textContent = `${processedCount} file${processedCount > 1 ? 's' : ''} added to cart!`;
+          createSuccessMessage.style.display = 'flex';
+          setTimeout(() => {
+            createSuccessMessage.style.display = 'none';
+          }, 3000);
+        } else {
+          // Fallback to notification if elements don't exist
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Files Added',
+            message: `${processedCount} file${processedCount > 1 ? 's' : ''} added to cart!`
+          });
+        }
+      } else if (processedCount > 0 && errorCount > 0) {
+        // Show mixed results
+        if (createSuccessMessage && createSuccessText) {
+          createSuccessText.textContent = `${processedCount} added, ${errorCount} failed`;
+          createSuccessMessage.style.display = 'flex';
+          setTimeout(() => {
+            createSuccessMessage.style.display = 'none';
+          }, 3000);
+        } else {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Files Processed',
+            message: `${processedCount} file(s) added successfully. ${errorCount} file(s) failed.`
+          });
+        }
       } else if (errorCount > 0) {
-        alert(`${processedCount} file(s) added successfully. ${errorCount} file(s) failed.`);
+        // All failed
+        if (createErrorMessage && createErrorText) {
+          createErrorText.textContent = `Failed to add ${errorCount} file${errorCount > 1 ? 's' : ''}`;
+          createErrorMessage.style.display = 'flex';
+          setTimeout(() => {
+            createErrorMessage.style.display = 'none';
+          }, 3000);
+        } else {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Failed',
+            message: `Failed to add ${errorCount} file${errorCount > 1 ? 's' : ''}`
+          });
+        }
       }
-    }, 500);
   }
   
   // Also handle dragenter/dragleave on document level for better UX
@@ -915,13 +977,25 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
   const createErrorMessage = document.getElementById('createErrorMessage');
   const createErrorText = document.getElementById('createErrorText');
   
-  // Hide messages initially
-  createSuccessMessage.style.display = 'none';
-  createErrorMessage.style.display = 'none';
-  
-  // Show processing message
-  createSuccessText.textContent = `Uploading ${emojis.length} emoji${emojis.length > 1 ? 's' : ''} to Slack...`;
-  createSuccessMessage.style.display = 'flex';
+  // Check if elements exist (they might not if we're on a different tab)
+  if (!createSuccessMessage || !createSuccessText || !createErrorMessage || !createErrorText) {
+    console.error('Required UI elements not found. Uploading in background...');
+    // Show notification instead
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Uploading Emojis',
+      message: `Uploading ${emojis.length} emoji${emojis.length > 1 ? 's' : ''} to Slack...`
+    });
+  } else {
+    // Hide messages initially
+    createSuccessMessage.style.display = 'none';
+    createErrorMessage.style.display = 'none';
+    
+    // Show processing message
+    createSuccessText.textContent = `Uploading ${emojis.length} emoji${emojis.length > 1 ? 's' : ''} to Slack...`;
+    createSuccessMessage.style.display = 'flex';
+  }
   
   const results = [];
   let successCount = 0;
@@ -933,7 +1007,9 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
     const emoji = emojis[i];
     
     // Update progress message
-    createSuccessText.textContent = `Uploading ${i + 1} of ${emojis.length}: ${emoji.name}`;
+    if (createSuccessText) {
+      createSuccessText.textContent = `Uploading ${i + 1} of ${emojis.length}: ${emoji.name}`;
+    }
     
     try {
       const result = await chrome.runtime.sendMessage({
@@ -988,24 +1064,48 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
   
   // Show final results
   if (authFailed) {
-    createErrorText.textContent = 'Authentication failed. Please visit your Slack workspace and try again.';
-    createErrorMessage.style.display = 'flex';
-    createSuccessMessage.style.display = 'none';
+    if (createErrorText && createErrorMessage && createSuccessMessage) {
+      createErrorText.textContent = 'Authentication failed. Please visit your Slack workspace and try again.';
+      createErrorMessage.style.display = 'flex';
+      createSuccessMessage.style.display = 'none';
+    } else {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Upload Failed',
+        message: 'Authentication failed. Please visit your Slack workspace and try again.'
+      });
+    }
   } else if (successCount === emojis.length) {
-    createSuccessText.textContent = `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded successfully to Slack!`;
-    createSuccessMessage.style.display = 'flex';
+    if (createSuccessText && createSuccessMessage) {
+      createSuccessText.textContent = `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded successfully to Slack!`;
+      createSuccessMessage.style.display = 'flex';
+    } else {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Upload Complete',
+        message: `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded successfully to Slack!`
+      });
+    }
     
     // Clear cart on success
     await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
     
     // Auto-sync to Emoji Studio after successful upload
-    createSuccessText.textContent = 'Syncing to Emoji Studio...';
+    if (createSuccessText) {
+      createSuccessText.textContent = 'Syncing to Emoji Studio...';
+    }
     try {
       await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
-      createSuccessText.textContent = `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded and synced!`;
+      if (createSuccessText) {
+        createSuccessText.textContent = `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded and synced!`;
+      }
     } catch (syncError) {
       // Sync failed but uploads succeeded
-      createSuccessText.textContent = `${successCount} emoji${successCount > 1 ? 's' : ''} uploaded. Manual sync required.`;
+      if (createSuccessText) {
+        createSuccessText.textContent = `${successCount} emoji${successCount > 1 ? 's' : ''} uploaded. Manual sync required.`;
+      }
     }
     
     // Reload the emoji list after a short delay
@@ -1013,8 +1113,17 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
       initializeCreateTab();
     }, 2000);
   } else if (successCount > 0) {
-    createSuccessText.textContent = `${successCount} succeeded, ${errorCount} failed. Check failed emojis in your cart.`;
-    createSuccessMessage.style.display = 'flex';
+    if (createSuccessText && createSuccessMessage) {
+      createSuccessText.textContent = `${successCount} succeeded, ${errorCount} failed. Check failed emojis in your cart.`;
+      createSuccessMessage.style.display = 'flex';
+    } else {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Partial Upload',
+        message: `${successCount} succeeded, ${errorCount} failed. Check failed emojis in your cart.`
+      });
+    }
     
     // Remove successful emojis from cart
     const failedEmojis = results.filter(r => !r.success).map(r => r.name);
@@ -1025,10 +1134,14 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
     
     // Auto-sync to Emoji Studio after partial upload
     if (successCount > 0) {
-      createSuccessText.textContent = 'Syncing successful uploads to Emoji Studio...';
+      if (createSuccessText) {
+        createSuccessText.textContent = 'Syncing successful uploads to Emoji Studio...';
+      }
       try {
         await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
-        createSuccessText.textContent = `${successCount} succeeded, ${errorCount} failed. Changes synced.`;
+        if (createSuccessText) {
+          createSuccessText.textContent = `${successCount} succeeded, ${errorCount} failed. Changes synced.`;
+        }
       } catch (syncError) {
         // Keep the original message if sync fails
       }
@@ -1039,9 +1152,18 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
       initializeCreateTab();
     }, 2000);
   } else {
-    createErrorText.textContent = 'All uploads failed. Please check your connection and try again.';
-    createErrorMessage.style.display = 'flex';
-    createSuccessMessage.style.display = 'none';
+    if (createErrorText && createErrorMessage && createSuccessMessage) {
+      createErrorText.textContent = 'All uploads failed. Please check your connection and try again.';
+      createErrorMessage.style.display = 'flex';
+      createSuccessMessage.style.display = 'none';
+    } else {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Upload Failed',
+        message: 'All uploads failed. Please check your connection and try again.'
+      });
+    }
   }
 }
 

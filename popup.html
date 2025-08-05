@@ -131,45 +131,47 @@
     <!-- Create Tab Content -->
     <div class="tab-content" id="createTab">
       <div class="create-section">
-        <!-- Create Header -->
-        <div class="create-header">
-          <h3>Create Emojis</h3>
-          <div class="header-actions">
-            <label for="fileInput" class="button button-text" style="cursor: pointer;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
-              </svg>
-              Upload
-            </label>
-            <input type="file" id="fileInput" accept="image/*,video/*" multiple style="display: none;">
-            <button class="button button-text" id="clearAllButton" style="display: none;">
-              Clear All
+        <div class="create-card">
+          <!-- Create Header -->
+          <div class="create-header">
+            <h3>Create Emojis</h3>
+            <div class="header-actions">
+              <label for="fileInput" class="button button-text" style="cursor: pointer;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload
+              </label>
+              <input type="file" id="fileInput" accept="image/*,video/*" multiple style="display: none;">
+              <button class="button button-text" id="clearAllButton" style="display: none;">
+                Clear All
+              </button>
+            </div>
+          </div>
+
+          <!-- Emoji List -->
+          <div class="emoji-items" id="emojiItems">
+            <div class="empty-state" id="emptyState">
+              <div class="empty-state-icon">✨</div>
+              <p class="empty-state-text">No emojis added yet</p>
+              <p class="empty-state-subtext">Drop images/videos here or add from slackmojis.com</p>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="create-actions" id="createActions" style="display: none;">
+            <div class="emoji-summary">
+              <span id="emojiSummary">0 emojis selected</span>
+            </div>
+            <button class="button button-primary full-width" id="sendToSlack">
+              Send to Slack
             </button>
           </div>
         </div>
 
-        <!-- Emoji List -->
-        <div class="emoji-items" id="emojiItems">
-          <div class="empty-state" id="emptyState">
-            <div class="empty-state-icon">✨</div>
-            <p class="empty-state-text">No emojis added yet</p>
-            <p class="empty-state-subtext">Drop images/videos here or add from slackmojis.com</p>
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="create-actions" id="createActions" style="display: none;">
-          <div class="emoji-summary">
-            <span id="emojiSummary">0 emojis selected</span>
-          </div>
-          <button class="button button-primary full-width" id="sendToSlack">
-            Send to Slack
-          </button>
-        </div>
-
-        <!-- Messages -->
+        <!-- Messages - Outside the card -->
         <div class="success-message" id="createSuccessMessage" style="display: none;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="20 6 9 17 4 12"></polyline>
