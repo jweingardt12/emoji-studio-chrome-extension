@@ -592,6 +592,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: result.success, error: result.error });
     });
     return true; // Keep channel open for async response
+  } else if (request.type === 'SYNC_TO_EMOJI_STUDIO_AND_OPEN') {
+    // Sync and then open Emoji Studio with loading parameter
+    syncToEmojiStudio(false).then(result => {
+      if (result.success) {
+        // Open Emoji Studio dashboard with a parameter to show loading
+        const emojiStudioUrl = getEmojiStudioUrl('/dashboard?syncing=true');
+        chrome.tabs.create({ url: emojiStudioUrl });
+      }
+      sendResponse({ success: result.success, error: result.error });
+    });
+    return true; // Keep channel open for async response
   } else if (request.type === 'UPDATE_SYNC_SETTINGS') {
     // Update sync settings
     chrome.storage.local.get('syncSettings', (result) => {

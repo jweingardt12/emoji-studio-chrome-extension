@@ -441,7 +441,7 @@ function showNotification(message) {
   // Add click handler for sync button
   const syncBtn = notification.querySelector('.emoji-studio-sync-btn');
   syncBtn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+    chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO_AND_OPEN' });
     // Remove notification immediately when clicked
     notification.style.animation = 'slideOut 0.15s ease-out forwards';
     setTimeout(() => notification.remove(), 200);
