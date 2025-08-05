@@ -352,10 +352,15 @@ body {
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 0.375rem;
-  background: var(--muted);
   border-radius: 0.25rem;
   font-size: 0.625rem;
   margin-top: 0.25rem;
+  min-height: 20px;
+  transition: background-color 0.3s ease;
+}
+
+.sync-status-compact:has(.sync-status-indicator:not([style*="display: none"])) {
+  background: var(--muted);
 }
 
 /* Sync Info */

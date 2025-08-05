@@ -283,7 +283,7 @@ async function initializeSyncTab() {
   // Update sync status display
   function updateSyncStatus(settings) {
     if (settings.syncState && settings.syncState !== 'idle') {
-      syncStatus.style.display = 'flex';
+      syncStatusIndicator.style.display = 'inline-block';
       
       // Remove all state classes
       syncStatusIndicator.classList.remove('syncing', 'success', 'error');
@@ -296,9 +296,10 @@ async function initializeSyncTab() {
         case 'success':
           syncStatusIndicator.classList.add('success');
           syncStatusMessage.textContent = 'Sync complete';
-          // Hide after 3 seconds
+          // Clear message after 3 seconds but keep the space
           setTimeout(() => {
-            syncStatus.style.display = 'none';
+            syncStatusIndicator.style.display = 'none';
+            syncStatusMessage.textContent = '';
           }, 3000);
           break;
         case 'error':
@@ -307,7 +308,8 @@ async function initializeSyncTab() {
           break;
       }
     } else {
-      syncStatus.style.display = 'none';
+      syncStatusIndicator.style.display = 'none';
+      syncStatusMessage.textContent = '';
     }
   }
   
@@ -449,7 +451,7 @@ async function initializeSyncTab() {
     
     try {
       // Show syncing status
-      syncStatus.style.display = 'flex';
+      syncStatusIndicator.style.display = 'inline-block';
       syncStatusIndicator.classList.remove('success', 'error');
       syncStatusIndicator.classList.add('syncing');
       syncStatusMessage.textContent = 'Syncing...';
@@ -465,9 +467,10 @@ async function initializeSyncTab() {
         // Update UI
         await updateUI();
         
-        // Hide status after 3 seconds
+        // Clear message after 3 seconds but keep the space
         setTimeout(() => {
-          syncStatus.style.display = 'none';
+          syncStatusIndicator.style.display = 'none';
+          syncStatusMessage.textContent = '';
         }, 3000);
       } else {
         // Sync failed
