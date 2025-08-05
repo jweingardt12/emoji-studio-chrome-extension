@@ -441,49 +441,76 @@ async function initializeSyncTab() {
     return true;
   });
   
-  // Refresh Data button - forces a new sync
+  // Refresh Data button - fetches fresh data from Slack
   refreshButton.addEventListener('click', async () => {
     if (Object.keys(capturedData).length === 0) return;
     
-    const now = Date.now();
     const workspace = Object.keys(capturedData)[0];
-    const dataToSend = Object.values(capturedData)[0];
     
-    try {
-      // Show syncing status
-      syncStatusIndicator.style.display = 'inline-block';
-      syncStatusIndicator.classList.remove('success', 'error');
-      syncStatusIndicator.classList.add('syncing');
-      syncStatusMessage.textContent = 'Syncing...';
-      
-      const response = await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
-      
-      if (response.success) {
-        // Successfully synced
-        syncStatusIndicator.classList.remove('syncing', 'error');
-        syncStatusIndicator.classList.add('success');
-        syncStatusMessage.textContent = 'Sync complete!';
+    // Show fetching status
+    syncStatusIndicator.style.display = 'inline-block';
+    syncStatusIndicator.classList.remove('success', 'error');
+    syncStatusIndicator.classList.add('syncing');
+    syncStatusMessage.textContent = 'Fetching fresh data...';
+    
+    // Open Slack emoji page to capture fresh data
+    const slackUrl = `https://${workspace}.slack.com/customize/emoji`;
+    
+    // Listen for data update
+    const dataUpdateListener = (request, sender, sendResponse) => {
+      if (request.type === 'DATA_UPDATED') {
+        // Data has been captured, now sync it
+        syncStatusMessage.textContent = 'Syncing to Emoji Studio...';
         
-        // Update UI
-        await updateUI();
+        // Sync the fresh data
+        chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' }).then(response => {
+          if (response.success) {
+            syncStatusIndicator.classList.remove('syncing', 'error');
+            syncStatusIndicator.classList.add('success');
+            syncStatusMessage.textContent = 'Data refreshed!';
+            
+            // Reload data and update UI
+            loadDataFromStorage().then(() => {
+              if (updateUIFunction) updateUIFunction();
+            });
+            
+            // Clear message after 3 seconds
+            setTimeout(() => {
+              syncStatusIndicator.style.display = 'none';
+              syncStatusMessage.textContent = '';
+            }, 3000);
+          } else {
+            syncStatusIndicator.classList.remove('syncing', 'success');
+            syncStatusIndicator.classList.add('error');
+            syncStatusMessage.textContent = 'Sync failed';
+          }
+        });
         
-        // Clear message after 3 seconds but keep the space
-        setTimeout(() => {
-          syncStatusIndicator.style.display = 'none';
-          syncStatusMessage.textContent = '';
-        }, 3000);
-      } else {
-        // Sync failed
+        // Remove this listener
+        chrome.runtime.onMessage.removeListener(dataUpdateListener);
+      }
+    };
+    
+    // Add listener for data updates
+    chrome.runtime.onMessage.addListener(dataUpdateListener);
+    
+    // Open the Slack page to trigger data capture
+    chrome.tabs.create({ url: slackUrl, active: false }, (tab) => {
+      // Close the tab after 5 seconds (enough time to capture data)
+      setTimeout(() => {
+        chrome.tabs.remove(tab.id);
+      }, 5000);
+    });
+    
+    // Timeout after 10 seconds if no data received
+    setTimeout(() => {
+      chrome.runtime.onMessage.removeListener(dataUpdateListener);
+      if (syncStatusMessage.textContent === 'Fetching fresh data...') {
         syncStatusIndicator.classList.remove('syncing', 'success');
         syncStatusIndicator.classList.add('error');
-        syncStatusMessage.textContent = 'Sync failed';
+        syncStatusMessage.textContent = 'Failed to fetch data';
       }
-    } catch (error) {
-      console.error('Sync error:', error);
-      syncStatusIndicator.classList.remove('syncing', 'success');
-      syncStatusIndicator.classList.add('error');
-      syncStatusMessage.textContent = 'Sync failed';
-    }
+    }, 10000);
   });
   
   // Open Emoji Studio button
