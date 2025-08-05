@@ -233,7 +233,8 @@ async function initializeSyncTab() {
   const emptyState = document.getElementById('emptyState');
   const workspaceName = document.getElementById('workspaceName');
   const syncStatusText = document.getElementById('syncStatusText');
-  const sendButton = document.getElementById('sendToEmojiStudio');
+  const refreshButton = document.getElementById('refreshData');
+  const openEmojiStudioButton = document.getElementById('openEmojiStudio');
   const autoSyncToggle = document.getElementById('autoSyncToggle');
   const syncInterval = document.getElementById('syncInterval');
   const syncIntervalContainer = document.getElementById('syncIntervalContainer');
@@ -378,12 +379,12 @@ async function initializeSyncTab() {
         syncStatusText.textContent = 'Never synced';
       }
       
-      sendButton.disabled = false;
+      refreshButton.disabled = false;
     } else {
       // Show empty state, hide connected state
       connectedState.style.display = 'none';
       emptyState.style.display = 'flex';
-      sendButton.disabled = true;
+      refreshButton.disabled = true;
     }
   }
   
@@ -439,7 +440,8 @@ async function initializeSyncTab() {
     return true;
   });
   
-  sendButton.addEventListener('click', async () => {
+  // Refresh Data button - forces a new sync
+  refreshButton.addEventListener('click', async () => {
     if (Object.keys(capturedData).length === 0) return;
     
     const now = Date.now();
@@ -447,14 +449,6 @@ async function initializeSyncTab() {
     const dataToSend = Object.values(capturedData)[0];
     
     try {
-      await chrome.storage.local.set({ 
-        pendingExtensionData: {
-          ...dataToSend,
-          workspace: workspace
-        },
-        lastSyncTime: now
-      });
-      
       // Show syncing status
       syncStatus.style.display = 'flex';
       syncStatusIndicator.classList.remove('success', 'error');
@@ -483,7 +477,17 @@ async function initializeSyncTab() {
         syncStatusMessage.textContent = 'Sync failed';
       }
     } catch (error) {
+      console.error('Sync error:', error);
+      syncStatusIndicator.classList.remove('syncing', 'success');
+      syncStatusIndicator.classList.add('error');
+      syncStatusMessage.textContent = 'Sync failed';
     }
+  });
+  
+  // Open Emoji Studio button
+  openEmojiStudioButton.addEventListener('click', () => {
+    const emojiStudioUrl = getEmojiStudioUrl('/dashboard');
+    chrome.tabs.create({ url: emojiStudioUrl });
   });
   
   // Initial UI update
