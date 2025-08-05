@@ -38,30 +38,88 @@
 
     <!-- Sync Tab Content -->
     <div class="tab-content active" id="syncTab">
-      <div class="status-section">
-      <div class="status-header">
-        <div class="status-indicator" id="statusIndicator"></div>
-        <span class="status-text" id="statusText">Checking connection...</span>
-      </div>
-      
-      <div class="workspace-list" id="workspaceList">
-        <div class="empty-state">
-          <div class="empty-state-icon">📡</div>
-          <p class="empty-state-text">No workspace detected yet</p>
+      <div class="sync-container">
+        <!-- Connected State -->
+        <div class="connected-state" id="connectedState" style="display: none;">
+          <div class="workspace-status">
+            <div class="status-icon-large">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+            </div>
+            <h3 class="status-title">Connected to Slack</h3>
+            <p class="workspace-name" id="workspaceName">workspace</p>
+          </div>
+          
+          <div class="sync-info">
+            <div class="sync-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+              <span id="syncStatusText">Last synced just now</span>
+            </div>
+            
+            <!-- Auto-sync settings -->
+            <div class="sync-settings">
+              <label class="sync-toggle">
+                <input type="checkbox" id="autoSyncToggle" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Auto-sync enabled</span>
+              </label>
+              
+              <div class="sync-interval-container" id="syncIntervalContainer">
+                <label for="syncInterval" class="interval-label">Sync every:</label>
+                <select id="syncInterval" class="interval-select">
+                  <option value="60">1 hour</option>
+                  <option value="120">2 hours</option>
+                  <option value="240">4 hours</option>
+                  <option value="360">6 hours</option>
+                  <option value="720">12 hours</option>
+                  <option value="1440">24 hours</option>
+                </select>
+              </div>
+              
+              <div class="sync-status" id="syncStatus" style="display: none;">
+                <span class="sync-status-indicator" id="syncStatusIndicator"></span>
+                <span class="sync-status-message" id="syncStatusMessage"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state-card" id="emptyState">
+          <div class="empty-state-illustration">
+            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path>
+              <path d="M12 6v6l4 2"></path>
+            </svg>
+          </div>
+          <h3 class="empty-state-title">No Workspace Connected</h3>
+          <p class="empty-state-description">Visit your Slack workspace's emoji page to capture emoji data</p>
+          <a href="https://slack.com/customize/emoji" target="_blank" class="empty-state-link">
+            Open Slack Emoji Page
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </a>
+        </div>
+
+        <!-- Action Button -->
+        <div class="sync-actions">
+          <button class="button button-primary full-width" id="sendToEmojiStudio" disabled>
+            <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+              <path d="M21 13v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"></path>
+            </svg>
+            <span>Sync to Emoji Studio</span>
+          </button>
         </div>
       </div>
-      
-    </div>
-
-    <div class="button-actions">
-      <button class="button button-primary full-width" id="sendToEmojiStudio" disabled>
-        <span>Sync to Emoji Studio</span>
-        <svg class="icon-send" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-          <polyline points="12 5 19 12 12 19"></polyline>
-        </svg>
-      </button>
-    </div>
     </div>
 
     <!-- Create Tab Content -->

@@ -105,6 +105,58 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initializeSyncTab();
   initializeCreateTab();
   
+  // Check if we need to auto-sync (> 24 hours since last sync)
+  chrome.storage.local.get(['lastSyncTime', 'slackData'], async (result) => {
+    if (result.slackData && Object.keys(result.slackData).length > 0) {
+      const lastSync = result.lastSyncTime || 0;
+      const hoursSinceSync = (Date.now() - lastSync) / (1000 * 60 * 60);
+      
+      if (hoursSinceSync > 24) {
+        // Show notification about auto-sync
+        const syncNotification = document.createElement('div');
+        syncNotification.className = 'warning-message';
+        syncNotification.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span>Data is ${Math.floor(hoursSinceSync / 24)} day(s) old. Auto-syncing...</span>
+        `;
+        document.querySelector('.container').insertBefore(syncNotification, document.querySelector('.tab-navigation'));
+        
+        // Perform auto-sync
+        try {
+          await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+          syncNotification.classList.remove('warning-message');
+          syncNotification.classList.add('success-message');
+          syncNotification.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Data synced successfully!</span>
+          `;
+          
+          // Remove notification after 3 seconds
+          setTimeout(() => syncNotification.remove(), 3000);
+          
+          // Update UI to show new sync time
+          if (updateUIFunction) updateUIFunction();
+        } catch (error) {
+          syncNotification.classList.add('error-message');
+          syncNotification.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+            <span>Auto-sync failed. Please sync manually.</span>
+          `;
+        }
+      }
+    }
+  });
+  
   // Listen for messages from background script
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
@@ -177,10 +229,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Sync Tab Functionality (keeping existing code)
 async function initializeSyncTab() {
   
-  const statusIndicator = document.getElementById('statusIndicator');
-  const statusText = document.getElementById('statusText');
-  const workspaceList = document.getElementById('workspaceList');
+  const connectedState = document.getElementById('connectedState');
+  const emptyState = document.getElementById('emptyState');
+  const workspaceName = document.getElementById('workspaceName');
+  const syncStatusText = document.getElementById('syncStatusText');
   const sendButton = document.getElementById('sendToEmojiStudio');
+  const autoSyncToggle = document.getElementById('autoSyncToggle');
+  const syncInterval = document.getElementById('syncInterval');
+  const syncIntervalContainer = document.getElementById('syncIntervalContainer');
+  const syncStatus = document.getElementById('syncStatus');
+  const syncStatusIndicator = document.getElementById('syncStatusIndicator');
+  const syncStatusMessage = document.getElementById('syncStatusMessage');
   
   // Load data again to be sure
   await loadDataFromStorage();
@@ -200,6 +259,58 @@ async function initializeSyncTab() {
     return 'Just now';
   }
   
+  // Load sync settings
+  async function loadSyncSettings() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_SYNC_SETTINGS' });
+      const settings = response.syncSettings;
+      
+      // Update UI with settings
+      autoSyncToggle.checked = settings.autoSyncEnabled;
+      syncInterval.value = settings.syncIntervalMinutes || 60;
+      syncIntervalContainer.style.display = settings.autoSyncEnabled ? 'flex' : 'none';
+      
+      // Update sync status display
+      updateSyncStatus(settings);
+      
+      return settings;
+    } catch (error) {
+      console.error('Failed to load sync settings:', error);
+      return null;
+    }
+  }
+  
+  // Update sync status display
+  function updateSyncStatus(settings) {
+    if (settings.syncState && settings.syncState !== 'idle') {
+      syncStatus.style.display = 'flex';
+      
+      // Remove all state classes
+      syncStatusIndicator.classList.remove('syncing', 'success', 'error');
+      
+      switch (settings.syncState) {
+        case 'syncing':
+          syncStatusIndicator.classList.add('syncing');
+          syncStatusMessage.textContent = 'Syncing...';
+          break;
+        case 'success':
+          syncStatusIndicator.classList.add('success');
+          syncStatusMessage.textContent = 'Sync complete';
+          // Hide after 3 seconds
+          setTimeout(() => {
+            syncStatus.style.display = 'none';
+          }, 3000);
+          break;
+        case 'error':
+          syncStatusIndicator.classList.add('error');
+          syncStatusMessage.textContent = 'Sync failed';
+          break;
+      }
+    } else {
+      syncStatus.style.display = 'none';
+    }
+  }
+  
   async function updateUI() {
     
     // Always reload from storage to ensure we have latest data
@@ -207,37 +318,71 @@ async function initializeSyncTab() {
     
     const workspaceCount = Object.keys(capturedData).length;
     
-    // Get last sync time from storage
+    // Get sync settings and last sync time
+    const syncSettings = await loadSyncSettings();
     const { lastSyncTime } = await chrome.storage.local.get('lastSyncTime');
+    const effectiveLastSync = syncSettings?.lastSuccessfulSync || lastSyncTime;
     
     if (workspaceCount > 0) {
-      statusIndicator.className = 'status-indicator status-connected';
-      statusText.textContent = 'Workspace connected';
+      // Show connected state, hide empty state
+      connectedState.style.display = 'block';
+      emptyState.style.display = 'none';
       
-      // Build workspace list HTML - now only showing one workspace
-      let html = '';
-      for (const [workspace, data] of Object.entries(capturedData)) {
-        html += `
-          <div class="workspace-item">
-            <div class="workspace-info">
-              <div class="workspace-name">${workspace}.slack.com</div>
-            </div>
-          </div>
-        `;
+      // Get the first (and usually only) workspace
+      const [workspace, data] = Object.entries(capturedData)[0];
+      
+      // Update workspace info
+      workspaceName.textContent = `${workspace}.slack.com`;
+      
+      // Update sync status
+      if (effectiveLastSync) {
+        const timeSinceSync = Date.now() - effectiveLastSync;
+        const hours = Math.floor(timeSinceSync / (1000 * 60 * 60));
+        const minutes = Math.floor((timeSinceSync % (1000 * 60 * 60)) / (1000 * 60));
+        
+        let statusText = 'Last synced ';
+        
+        if (hours > 24) {
+          statusText += `${Math.floor(hours / 24)} day${Math.floor(hours / 24) > 1 ? 's' : ''} ago`;
+        } else if (hours > 0) {
+          statusText += `${hours} hour${hours > 1 ? 's' : ''} ago`;
+        } else if (minutes > 0) {
+          statusText += `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+        } else {
+          statusText += 'just now';
+        }
+        
+        syncStatusText.textContent = statusText;
+        
+        // Show next sync time if auto-sync is enabled
+        if (syncSettings?.autoSyncEnabled) {
+          const nextSyncTime = effectiveLastSync + (syncSettings.syncIntervalMinutes * 60 * 1000);
+          const timeUntilSync = nextSyncTime - Date.now();
+          
+          if (timeUntilSync > 0) {
+            const hoursUntil = Math.floor(timeUntilSync / (1000 * 60 * 60));
+            const minutesUntil = Math.floor((timeUntilSync % (1000 * 60 * 60)) / (1000 * 60));
+            
+            let nextSyncText = ' • Next sync in ';
+            if (hoursUntil > 0) {
+              nextSyncText += `${hoursUntil}h ${minutesUntil}m`;
+            } else {
+              nextSyncText += `${minutesUntil}m`;
+            }
+            syncStatusText.textContent += nextSyncText;
+          } else {
+            syncStatusText.textContent += ' • Sync pending';
+          }
+        }
+      } else {
+        syncStatusText.textContent = 'Never synced';
       }
       
-      workspaceList.innerHTML = html;
       sendButton.disabled = false;
     } else {
-      statusIndicator.className = 'status-indicator status-disconnected';
-      statusText.textContent = 'No workspace connected';
-      workspaceList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">📡</div>
-          <p class="empty-state-text">Navigate to your Slack workspace and go to the emoji customization page to connect</p>
-          <p class="empty-state-subtext">Visit <strong>workspace.slack.com/customize/emoji</strong></p>
-        </div>
-      `;
+      // Show empty state, hide connected state
+      connectedState.style.display = 'none';
+      emptyState.style.display = 'flex';
       sendButton.disabled = true;
     }
   }
@@ -245,21 +390,98 @@ async function initializeSyncTab() {
   // Store reference to updateUI function globally
   updateUIFunction = updateUI;
   
+  // Handle auto-sync toggle
+  autoSyncToggle.addEventListener('change', async () => {
+    const enabled = autoSyncToggle.checked;
+    syncIntervalContainer.style.display = enabled ? 'flex' : 'none';
+    
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_SYNC_SETTINGS',
+        settings: { autoSyncEnabled: enabled }
+      });
+      
+      if (enabled) {
+        // If enabling, trigger an immediate sync check
+        chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+      }
+    } catch (error) {
+      console.error('Failed to update auto-sync setting:', error);
+    }
+  });
+  
+  // Handle sync interval change
+  syncInterval.addEventListener('change', async () => {
+    const intervalMinutes = parseInt(syncInterval.value);
+    
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_SYNC_SETTINGS',
+        settings: { syncIntervalMinutes: intervalMinutes }
+      });
+      
+      // Update UI to show new next sync time
+      await updateUI();
+    } catch (error) {
+      console.error('Failed to update sync interval:', error);
+    }
+  });
+  
+  // Listen for sync state updates from background
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'SYNC_STATE_UPDATED') {
+      updateSyncStatus(request.syncSettings);
+      // Also update main UI if sync completed
+      if (request.syncSettings.syncState === 'success') {
+        updateUI();
+      }
+    }
+    return true;
+  });
+  
   sendButton.addEventListener('click', async () => {
     if (Object.keys(capturedData).length === 0) return;
     
     const now = Date.now();
+    const workspace = Object.keys(capturedData)[0];
     const dataToSend = Object.values(capturedData)[0];
     
     try {
       await chrome.storage.local.set({ 
-        pendingExtensionData: dataToSend,
+        pendingExtensionData: {
+          ...dataToSend,
+          workspace: workspace
+        },
         lastSyncTime: now
       });
       
-      chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+      // Show syncing status
+      syncStatus.style.display = 'flex';
+      syncStatusIndicator.classList.remove('success', 'error');
+      syncStatusIndicator.classList.add('syncing');
+      syncStatusMessage.textContent = 'Syncing...';
       
-      // Successfully synced
+      const response = await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+      
+      if (response.success) {
+        // Successfully synced
+        syncStatusIndicator.classList.remove('syncing', 'error');
+        syncStatusIndicator.classList.add('success');
+        syncStatusMessage.textContent = 'Sync complete!';
+        
+        // Update UI
+        await updateUI();
+        
+        // Hide status after 3 seconds
+        setTimeout(() => {
+          syncStatus.style.display = 'none';
+        }, 3000);
+      } else {
+        // Sync failed
+        syncStatusIndicator.classList.remove('syncing', 'success');
+        syncStatusIndicator.classList.add('error');
+        syncStatusMessage.textContent = 'Sync failed';
+      }
     } catch (error) {
     }
   });
@@ -437,10 +659,11 @@ function initializeCreateTab() {
             return;
           }
           
-          // Get workspace data
+          // Check if connected to a workspace
+          await loadDataFromStorage();
           const workspaceData = Object.values(capturedData)[0];
           if (!workspaceData) {
-            createErrorText.textContent = 'No Slack workspace connected';
+            createErrorText.textContent = 'Connect to a Slack workspace first. Go to the Sync tab to connect.';
             createErrorMessage.style.display = 'flex';
             return;
           }
@@ -521,6 +744,19 @@ function initializeCreateTab() {
   }
   
   async function handleFiles(files) {
+    // Check if connected to a workspace first
+    await loadDataFromStorage();
+    if (Object.keys(capturedData).length === 0) {
+      const createErrorMessage = document.getElementById('createErrorMessage');
+      const createErrorText = document.getElementById('createErrorText');
+      createErrorText.textContent = 'Connect to a Slack workspace first. Go to the Sync tab to connect.';
+      createErrorMessage.style.display = 'flex';
+      setTimeout(() => {
+        createErrorMessage.style.display = 'none';
+      }, 5000);
+      return;
+    }
+    
     const validFiles = Array.from(files).filter(file => {
       const isImage = file.type.startsWith('image/');
       const isVideo = file.type.startsWith('video/');
@@ -730,6 +966,16 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
     // Clear cart on success
     await chrome.runtime.sendMessage({ type: 'CLEAR_CART' });
     
+    // Auto-sync to Emoji Studio after successful upload
+    createSuccessText.textContent = 'Syncing to Emoji Studio...';
+    try {
+      await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+      createSuccessText.textContent = `All ${successCount} emoji${successCount > 1 ? 's' : ''} uploaded and synced!`;
+    } catch (syncError) {
+      // Sync failed but uploads succeeded
+      createSuccessText.textContent = `${successCount} emoji${successCount > 1 ? 's' : ''} uploaded. Manual sync required.`;
+    }
+    
     // Reload the emoji list after a short delay
     setTimeout(() => {
       initializeCreateTab();
@@ -744,6 +990,17 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
     const currentCart = response.cart || [];
     const updatedCart = currentCart.filter(emoji => failedEmojis.includes(emoji.name));
     await chrome.storage.local.set({ emojiCart: updatedCart });
+    
+    // Auto-sync to Emoji Studio after partial upload
+    if (successCount > 0) {
+      createSuccessText.textContent = 'Syncing successful uploads to Emoji Studio...';
+      try {
+        await chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO' });
+        createSuccessText.textContent = `${successCount} succeeded, ${errorCount} failed. Changes synced.`;
+      } catch (syncError) {
+        // Keep the original message if sync fails
+      }
+    }
     
     // Reload the emoji list
     setTimeout(() => {

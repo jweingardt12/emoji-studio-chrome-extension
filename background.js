@@ -91,18 +91,31 @@ function updateCartBadge() {
 // Initialize the extension and set up alarms
 chrome.runtime.onInstalled.addListener(() => {
   
-  // Set up alarm for auto-sync every 24 hours
+  // Set up alarm for auto-sync every hour
   chrome.alarms.create('autoSync', {
-    periodInMinutes: 24 * 60 // 24 hours
+    periodInMinutes: 60, // 1 hour
+    delayInMinutes: 1 // Start checking after 1 minute
   });
   
   // Load existing data from storage
-  chrome.storage.local.get(['slackData', 'emojiCart'], (result) => {
+  chrome.storage.local.get(['slackData', 'emojiCart', 'syncSettings'], (result) => {
     if (result.slackData) {
       capturedData = result.slackData;
     }
     if (result.emojiCart) {
       emojiCart = result.emojiCart;
+    }
+    // Initialize sync settings if not present
+    if (!result.syncSettings) {
+      chrome.storage.local.set({
+        syncSettings: {
+          autoSyncEnabled: true,
+          syncIntervalMinutes: 60,
+          lastSyncAttempt: null,
+          lastSuccessfulSync: null,
+          syncState: 'idle' // idle, syncing, success, error
+        }
+      });
     }
   });
   
@@ -119,7 +132,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // Also load data on startup (not just on install)
-chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand'], (result) => {
+chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand', 'syncSettings'], (result) => {
   console.log('Loading data on startup:', result);
   if (result.slackData) {
     capturedData = result.slackData;
@@ -141,26 +154,126 @@ chrome.storage.local.get(['slackData', 'emojiCart', 'slackCurlCommand'], (result
     emojiCart = [];
     console.log('No cart found, initialized empty cart');
   }
+  
+  // Check sync settings and possibly recreate alarm with correct interval
+  if (result.syncSettings && result.syncSettings.autoSyncEnabled) {
+    const intervalMinutes = result.syncSettings.syncIntervalMinutes || 60;
+    // Clear existing alarm and recreate with correct interval
+    chrome.alarms.clear('autoSync', () => {
+      chrome.alarms.create('autoSync', {
+        periodInMinutes: intervalMinutes,
+        delayInMinutes: 1
+      });
+    });
+    
+    // Check if we need to sync on startup
+    const lastSync = result.syncSettings.lastSuccessfulSync;
+    if (lastSync) {
+      const timeSinceSync = Date.now() - lastSync;
+      const intervalMs = intervalMinutes * 60 * 1000;
+      if (timeSinceSync >= intervalMs) {
+        console.log('Time for auto-sync on startup');
+        setTimeout(() => checkAndAutoSync(), 5000); // Delay 5 seconds to let everything initialize
+      }
+    }
+  }
 });
 
 // Handle alarm events
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'autoSync') {
-    checkAndAutoSync();
+    console.log('Auto-sync alarm triggered');
+    
+    // Check if auto-sync is enabled
+    const { syncSettings } = await chrome.storage.local.get('syncSettings');
+    if (syncSettings && syncSettings.autoSyncEnabled) {
+      await checkAndAutoSync();
+    }
   }
 });
 
 
 // Function to sync data to Emoji Studio
-function syncToEmojiStudio() {
+async function syncToEmojiStudio(isAutoSync = false) {
   if (Object.keys(capturedData).length === 0) {
-    return;
+    return { success: false, error: 'No data to sync' };
   }
   
   const now = Date.now();
-  const dataToSend = Object.values(capturedData)[0];
+  const workspace = Object.keys(capturedData)[0];
+  const dataToSend = capturedData[workspace];
   
-  try {
+  // Update sync state
+  await updateSyncState('syncing', now);
+  
+  // First, try to sync via API
+  console.log(`Attempting to sync via API (isAutoSync: ${isAutoSync})...`);
+  
+  const apiUrls = [
+    'https://app.emojistudio.xyz/api/sync-from-extension',
+    'https://emojistudio.xyz/api/sync-from-extension'
+  ];
+  
+  // Add localhost for development
+  if (chrome.runtime.getManifest().update_url === undefined) {
+    apiUrls.push('http://localhost:3000/api/sync-from-extension');
+  }
+  
+  let syncSuccess = false;
+  let lastError = null;
+  
+  for (const apiUrl of apiUrls) {
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace: workspace,
+          emojiData: dataToSend.emoji || [],
+          emojiCount: dataToSend.emojiCount || 0,
+          lastFetchTime: dataToSend.lastFetchTime || new Date().toISOString()
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('API sync successful:', result);
+        chrome.storage.local.set({ lastSyncTime: now });
+        
+        // Update sync state to success
+        await updateSyncState('success', now, now);
+        
+        // Show success notification only for manual syncs
+        if (!isAutoSync) {
+          chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'icons/icon128.png',
+            title: 'Emoji Studio Sync',
+            message: `Successfully synced ${dataToSend.emojiCount || 0} emojis to Emoji Studio!`
+          });
+        }
+        
+        syncSuccess = true;
+        break;
+      }
+    } catch (error) {
+      console.log(`API sync failed for ${apiUrl}:`, error.message);
+      lastError = error.message;
+    }
+  }
+  
+  // If API sync succeeded, we're done
+  if (syncSuccess) {
+    return { success: true };
+  }
+  
+  // Otherwise, fall back to the tab-based method (only for manual syncs)
+  if (!isAutoSync) {
+    console.log('API sync failed, falling back to tab method...');
+    
+    try {
     // Find Emoji Studio tab or create one
     const emojiStudioUrl = getEmojiStudioUrl('/?extension=true');
     const baseUrl = getEmojiStudioUrl('');
@@ -168,7 +281,10 @@ function syncToEmojiStudio() {
     chrome.tabs.query({ url: [`${baseUrl}/*`] }, (tabs) => {
       
       chrome.storage.local.set({ 
-        pendingExtensionData: dataToSend,
+        pendingExtensionData: {
+          ...dataToSend,
+          workspace: workspace
+        },
         lastSyncTime: now
       }, () => {
         if (tabs.length > 0) {
@@ -217,22 +333,88 @@ function syncToEmojiStudio() {
         
       });
     });
-  } catch (error) {
+    } catch (error) {
+      await updateSyncState('error', now);
+      return { success: false, error: error.message };
+    }
+  } else {
+    // For auto-sync, don't open tabs, just mark as failed
+    await updateSyncState('error', now);
+    console.log('Auto-sync failed: API not reachable');
+    return { success: false, error: lastError || 'API not reachable' };
   }
 }
 
+// Function to update sync state in storage
+async function updateSyncState(state, lastAttempt = null, lastSuccess = null) {
+  const { syncSettings } = await chrome.storage.local.get('syncSettings');
+  const updatedSettings = {
+    ...syncSettings,
+    syncState: state
+  };
+  
+  if (lastAttempt !== null) {
+    updatedSettings.lastSyncAttempt = lastAttempt;
+  }
+  
+  if (lastSuccess !== null) {
+    updatedSettings.lastSuccessfulSync = lastSuccess;
+  }
+  
+  await chrome.storage.local.set({ syncSettings: updatedSettings });
+  
+  // Notify popup if it's open
+  chrome.runtime.sendMessage({ 
+    type: 'SYNC_STATE_UPDATED', 
+    syncSettings: updatedSettings 
+  }).catch(() => {});
+}
+
 // Function to perform auto-sync
-function checkAndAutoSync() {
-  chrome.storage.local.get('lastSyncTime', (result) => {
-    const lastSyncTime = result.lastSyncTime;
-    const now = Date.now();
-    const twentyFourHours = 24 * 60 * 60 * 1000;
-    
-    // Check if we have data and if it's been more than 24 hours
-    if (Object.keys(capturedData).length > 0 && (!lastSyncTime || (now - lastSyncTime) > twentyFourHours)) {
-      syncToEmojiStudio();
-    }
-  });
+async function checkAndAutoSync() {
+  console.log('Checking for auto-sync...');
+  
+  // Load fresh data from storage
+  const result = await chrome.storage.local.get(['slackData', 'syncSettings', 'lastSyncTime']);
+  
+  if (result.slackData) {
+    capturedData = result.slackData;
+  }
+  
+  // Check if we have data to sync
+  if (!capturedData || Object.keys(capturedData).length === 0) {
+    console.log('No data to auto-sync');
+    return;
+  }
+  
+  const syncSettings = result.syncSettings || {
+    autoSyncEnabled: true,
+    syncIntervalMinutes: 60
+  };
+  
+  if (!syncSettings.autoSyncEnabled) {
+    console.log('Auto-sync is disabled');
+    return;
+  }
+  
+  const lastSyncTime = syncSettings.lastSuccessfulSync || result.lastSyncTime;
+  const now = Date.now();
+  const intervalMs = (syncSettings.syncIntervalMinutes || 60) * 60 * 1000;
+  
+  // Check if enough time has passed since last sync
+  if (lastSyncTime && (now - lastSyncTime) < intervalMs) {
+    console.log(`Not time for sync yet. Last sync: ${new Date(lastSyncTime).toISOString()}, Interval: ${syncSettings.syncIntervalMinutes} minutes`);
+    return;
+  }
+  
+  console.log('Performing auto-sync...');
+  const result_sync = await syncToEmojiStudio(true);
+  
+  if (result_sync.success) {
+    console.log('Auto-sync completed successfully');
+  } else {
+    console.log('Auto-sync failed:', result_sync.error);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -389,8 +571,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
     sendResponse({ success: true });
   } else if (request.type === 'SYNC_TO_EMOJI_STUDIO') {
-    syncToEmojiStudio();
-    sendResponse({ success: true });
+    syncToEmojiStudio(false).then(result => {
+      sendResponse({ success: result.success, error: result.error });
+    });
+    return true; // Keep channel open for async response
+  } else if (request.type === 'UPDATE_SYNC_SETTINGS') {
+    // Update sync settings
+    chrome.storage.local.get('syncSettings', (result) => {
+      const currentSettings = result.syncSettings || {};
+      const newSettings = { ...currentSettings, ...request.settings };
+      
+      chrome.storage.local.set({ syncSettings: newSettings }, () => {
+        // If sync interval changed, update the alarm
+        if (request.settings.syncIntervalMinutes) {
+          chrome.alarms.clear('autoSync', () => {
+            if (newSettings.autoSyncEnabled) {
+              chrome.alarms.create('autoSync', {
+                periodInMinutes: request.settings.syncIntervalMinutes,
+                delayInMinutes: 1
+              });
+            }
+          });
+        }
+        
+        // If auto-sync was just enabled, check if we should sync now
+        if (request.settings.autoSyncEnabled === true && !currentSettings.autoSyncEnabled) {
+          checkAndAutoSync();
+        }
+        
+        sendResponse({ success: true });
+      });
+    });
+    return true;
+  } else if (request.type === 'GET_SYNC_SETTINGS') {
+    chrome.storage.local.get('syncSettings', (result) => {
+      sendResponse({ 
+        syncSettings: result.syncSettings || {
+          autoSyncEnabled: true,
+          syncIntervalMinutes: 60,
+          lastSyncAttempt: null,
+          lastSuccessfulSync: null,
+          syncState: 'idle'
+        }
+      });
+    });
+    return true;
   } else if (request.type === 'SHOW_NOTIFICATION') {
     chrome.notifications.create({
       type: 'basic',

@@ -1,5 +1,76 @@
 # Changelog
 
+## [1.2.0] - 2025-08-05
+
+### Added
+- **Automatic Background Syncing**: Configurable intervals (1, 2, 4, 6, 12, or 24 hours)
+- **Sync Settings UI**: Toggle and interval selector in the popup
+- **Real-time Sync Status**: Visual indicators showing syncing, success, or error states
+- **Next Sync Display**: Shows when the next automatic sync will occur
+- **Persistent Sync State**: Sync settings and state preserved across browser sessions
+- **Smart Sync on Startup**: Checks if sync is needed when Chrome starts
+
+### Changed
+- Default sync interval changed from 24 hours to 1 hour for better data freshness
+- Background sync starts 1 minute after browser startup instead of immediately
+- Auto-sync runs silently without notifications (only manual syncs show notifications)
+- Sync state is now stored in Chrome storage for better persistence
+
+### Fixed
+- Users no longer need to re-sync after closing Chrome or waiting a day
+- Background sync properly resumes after browser restart
+- Sync settings persist between extension updates
+- Improved error handling for background sync failures
+
+## [1.1.3] - 2025-08-05
+
+### API Sync Foundation
+
+This release lays the groundwork for syncing without opening the Emoji Studio app.
+
+### Added
+- **API Sync Attempt**: Chrome extension now tries to sync via API endpoints first
+- **Fallback Mechanism**: If API sync fails, falls back to the original tab-based sync
+- **Sync Notifications**: Shows success notification when sync completes via API
+- **API Endpoint**: Created `/api/sync-from-extension` endpoint in Emoji Studio app
+
+### Technical Notes
+- The API endpoint currently only validates data - full backend storage would require:
+  - User authentication system
+  - Database for storing emoji data
+  - Changes to how Emoji Studio app loads data
+- For now, users still need to open Emoji Studio at least once to store data in localStorage
+- This serves as a foundation for future true server-side sync capabilities
+
+## [1.1.2] - 2025-08-05
+
+### Enhanced Sync Functionality
+
+This release addresses user feedback about syncing issues with uploaded and renamed emojis.
+
+### Added
+- **Last Sync Time Display**: Shows when data was last synced to Emoji Studio with visual indicators
+  - Green: Synced recently
+  - Yellow: Synced 12-24 hours ago  
+  - Red: Synced more than 24 hours ago
+- **Auto-sync After Uploads**: Automatically syncs to Emoji Studio after successfully uploading emojis to Slack
+- **Auto-sync After 24 Hours**: Prompts automatic sync when data is older than 24 hours
+- **Improved Sync Status**: Visual feedback during sync operations
+
+### Fixed
+- Uploaded emojis now appear in Emoji Studio immediately after upload (no manual sync required)
+- Renamed emojis now reflect properly in Emoji Studio after the operation
+- Better handling of partial upload success with automatic sync
+
+### Changed
+- Updated sync button icon to better represent the sync action
+- Improved sync status messages to be more informative
+
+### Technical Improvements
+- Automatic sync triggers after emoji operations
+- Better error handling for sync failures
+- Improved user feedback during sync operations
+
 ## [1.1.1] - 2025-02-01
 
 ### UI/UX Improvements
