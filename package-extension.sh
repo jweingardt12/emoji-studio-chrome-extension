@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Package Chrome Extension for Release
-echo "Packaging Emoji Studio Chrome Extension v1.1.1..."
+echo "Packaging Emoji Studio Chrome Extension v1.3.1..."
 
 # Create a clean dist directory
 rm -rf dist
 mkdir -p dist
 
 # Create the zip file excluding unnecessary files
-zip -r dist/emoji-studio-extension-v1.1.1.zip . \
+zip -r dist/emoji-studio-extension-v1.3.1.zip . \
   -x ".*" \
   -x "*.sh" \
   -x "*.md" \
@@ -23,7 +23,7 @@ zip -r dist/emoji-studio-extension-v1.1.1.zip . \
   -x "package-lock.json"
 
 echo "✅ Extension packaged successfully!"
-echo "📦 Output: dist/emoji-studio-extension-v1.1.1.zip"
+echo "📦 Output: dist/emoji-studio-extension-v1.3.1.zip"
 echo ""
 echo "Next steps:"
 echo "1. Upload to Chrome Web Store Developer Dashboard"

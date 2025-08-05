@@ -8,16 +8,23 @@
 - **Toast Notifications**: Success notifications show when data is synced to the app
 - **Universal Handler**: ChromeExtensionHandler component added to all pages for consistent sync support
 
+### Fixed
+- **Data Delivery Timing**: Added delay to ensure Emoji Studio page is ready before sending synced data
+- **EMOJI_STUDIO_READY Handler**: Extension now responds to ready signal with synced data
+- **Improved Reliability**: Better coordination between extension and app for data sync
+
 ### Changed
 - ChromeExtensionHandler now processes synced data even when not coming directly from extension
 - Added processSyncedData callback to handle background sync data
 - Dashboard and Settings pages now include the ChromeExtensionHandler for data reception
+- Inject.js now waits 500ms before sending data to ensure page readiness
 
 ### Technical Improvements
 - Added SyncedEmojiData and SyncedEmojiMeta interfaces for type safety
 - Extension listener now supports three callbacks: auth data, clear data, and synced data
 - Improved error handling and logging throughout the sync process
 - Added automatic UI refresh when new emoji data is received
+- Better message passing timing between extension and Emoji Studio app
 
 ## [1.3.0] - 2025-08-05
 
