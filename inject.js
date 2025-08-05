@@ -81,7 +81,7 @@
   });
   
   // Check if we're on the dashboard with extension parameter
-  const urlParams = new URLSearchParams(window.location.search);
+  // urlParams already declared above, reuse it
   
   
   // Add a visual indicator that the extension is loaded
@@ -106,7 +106,7 @@
   } else if (window.location.pathname.includes('create')) {
       
       // Check if we came from the extension (new workflow)
-      const urlParams = new URLSearchParams(window.location.search);
+      // urlParams already declared above, reuse it
       if (urlParams.get('from') === 'extension') {
         
         // Add a small delay to ensure storage is written before we read it

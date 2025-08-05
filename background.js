@@ -6,12 +6,16 @@ let emojiCart = []; // Cart to store emojis before adding to Emoji Studio
 // Function to broadcast messages to all Emoji Studio tabs
 async function broadcastToEmojiStudioTabs(message) {
   try {
+    console.log('[broadcastToEmojiStudioTabs] Broadcasting message:', message.type);
     const tabs = await chrome.tabs.query({
       url: ['https://app.emojistudio.xyz/*', 'https://emojistudio.xyz/*']
     });
     
+    console.log('[broadcastToEmojiStudioTabs] Found', tabs.length, 'Emoji Studio tabs');
+    
     for (const tab of tabs) {
       try {
+        console.log(`[broadcastToEmojiStudioTabs] Sending ${message.type} to tab ${tab.id}`);
         await chrome.tabs.sendMessage(tab.id, message);
       } catch (error) {
         // Tab might not have content script loaded, ignore
@@ -221,10 +225,10 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
     // Build the API URL
     const apiUrl = `https://${workspace}.slack.com/api/emoji.adminList`;
     
-    // Prepare the request body - try a more conservative approach
+    // Prepare the request body - get ALL emojis
     const params = new URLSearchParams({
       token: workspaceData.token || workspaceData.formToken,
-      count: 5000
+      count: 100000  // Set very high to get all emojis
     });
     
     // Make the API request
@@ -273,6 +277,7 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
       
       return { 
         success: true, 
+        data: freshData,
         emojiCount: freshData.emojiCount,
         message: `Fetched ${freshData.emojiCount} emojis` 
       };
@@ -306,6 +311,15 @@ async function syncToEmojiStudio(isAutoSync = false) {
   
   if (Object.keys(capturedData).length === 0) {
     console.error('[syncToEmojiStudio] No captured data available for sync');
+    
+    // Broadcast error to tabs so loading overlay can be dismissed
+    broadcastToEmojiStudioTabs({ 
+      type: 'SYNC_ERROR', 
+      workspace: 'unknown',
+      error: 'No data to sync. Please visit a Slack emoji page first.',
+      timestamp: Date.now() 
+    });
+    
     return { success: false, error: 'No data to sync' };
   }
   
@@ -328,6 +342,22 @@ async function syncToEmojiStudio(isAutoSync = false) {
   await updateSyncState('syncing', now);
   
   try {
+    // If we don't have emoji data, try to fetch it fresh
+    if (!dataToSend.emoji || dataToSend.emoji.length === 0 || !dataToSend.emojiCount) {
+      console.log('[syncToEmojiStudio] No emoji data found, fetching fresh data from Slack...');
+      
+      const freshDataResult = await fetchFreshEmojiData(workspace, dataToSend);
+      if (freshDataResult.success && freshDataResult.data) {
+        console.log('[syncToEmojiStudio] Successfully fetched fresh data:', freshDataResult.data.emojiCount, 'emojis');
+        // Update the capturedData with fresh data
+        capturedData[workspace] = freshDataResult.data;
+        // Update dataToSend reference
+        Object.assign(dataToSend, freshDataResult.data);
+      } else {
+        console.warn('[syncToEmojiStudio] Failed to fetch fresh data:', freshDataResult.error);
+        // Continue with existing data even if empty
+      }
+    }
     // Store emoji data in Chrome storage for Emoji Studio to read
     const emojiData = {
       workspace: workspace,
@@ -411,7 +441,7 @@ async function syncToEmojiStudio(isAutoSync = false) {
     // Broadcast sync error to all tabs
     broadcastToEmojiStudioTabs({ 
       type: 'SYNC_ERROR', 
-      workspace: workspace,
+      workspace: workspace || 'unknown',
       error: error.message,
       timestamp: now 
     });
@@ -547,7 +577,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         -H 'sec-fetch-dest: empty' \\
         -H 'sec-fetch-mode: cors' \\
         -H 'sec-fetch-site: same-origin' \\
-        --data-raw $'------${boundary}\\r\\nContent-Disposition: form-data; name="token"\\r\\n\\r\\n${token}\\r\\n------${boundary}\\r\\nContent-Disposition: form-data; name="count"\\r\\n\\r\\n20000\\r\\n------${boundary}--\\r\\n'`;
+        --data-raw $'------${boundary}\\r\\nContent-Disposition: form-data; name="token"\\r\\n\\r\\n${token}\\r\\n------${boundary}\\r\\nContent-Disposition: form-data; name="count"\\r\\n\\r\\n100000\\r\\n------${boundary}--\\r\\n'`;
       
       console.log('Storing curl command for future use');
       console.log('Token:', token ? token.substring(0, 15) + '...' : 'none');
@@ -653,14 +683,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true; // Keep channel open for async response
   } else if (request.type === 'SYNC_TO_EMOJI_STUDIO_AND_OPEN') {
+    console.log('[Background] SYNC_TO_EMOJI_STUDIO_AND_OPEN received');
+    console.log('[Background] Current capturedData keys:', Object.keys(capturedData));
+    
     // Open Emoji Studio dashboard with sync parameter to indicate sync will start
     const emojiStudioUrl = getEmojiStudioUrl('/dashboard?syncStarting=true');
+    console.log('[Background] Opening dashboard at:', emojiStudioUrl);
     chrome.tabs.create({ url: emojiStudioUrl });
     
     // Start sync after a short delay to ensure dashboard is ready for progress messages
+    console.log('[Background] Setting up sync delay...');
     setTimeout(() => {
+      console.log('[Background] Starting delayed sync...');
       syncToEmojiStudio(false).then(result => {
+        console.log('[Background] Sync completed with result:', result);
         sendResponse({ success: result.success, error: result.error });
+      }).catch(error => {
+        console.error('[Background] Sync failed with error:', error);
+        sendResponse({ success: false, error: error.message });
       });
     }, 1000); // 1 second delay
     return true; // Keep channel open for async response
