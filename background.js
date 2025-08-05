@@ -201,12 +201,10 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
     // Build the API URL
     const apiUrl = `https://${workspace}.slack.com/api/emoji.adminList`;
     
-    // Prepare the request body
+    // Prepare the request body - try a more conservative approach
     const params = new URLSearchParams({
       token: workspaceData.token || workspaceData.formToken,
-      count: 20000,
-      _x_reason: 'customize-emoji-list',
-      _x_mode: 'online'
+      count: 5000
     });
     
     // Make the API request
@@ -223,10 +221,14 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
     });
     
     if (!response.ok) {
+      console.error(`HTTP error! status: ${response.status}, statusText: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('Response body:', errorText);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
     const data = await response.json();
+    console.log('Slack API response:', data);
     
     if (data.ok) {
       // Update the captured data with fresh emoji list
@@ -255,6 +257,7 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
         message: `Fetched ${freshData.emojiCount} emojis` 
       };
     } else {
+      console.error('Slack API returned ok: false', data);
       throw new Error(data.error || 'Failed to fetch emoji data');
     }
   } catch (error) {
