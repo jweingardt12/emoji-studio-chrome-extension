@@ -30,8 +30,10 @@
     return false;
   }
   
-  // Check for synced data on page load
-  checkForSyncedData();
+  // Check for synced data on page load with a small delay to ensure page is ready
+  setTimeout(() => {
+    checkForSyncedData();
+  }, 500);
   
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);
@@ -207,6 +209,10 @@
     } else if (event.data.type === 'REQUEST_EXTENSION_SYNC_DATA') {
       // Emoji Studio requesting synced data
       console.log('[Inject] Emoji Studio requesting synced data');
+      checkForSyncedData();
+    } else if (event.data.type === 'EMOJI_STUDIO_READY') {
+      // Emoji Studio is ready, send synced data if available
+      console.log('[Inject] Emoji Studio ready, checking for synced data');
       checkForSyncedData();
     } else if (event.data.type === 'REQUEST_EXTENSION_DATA') {
       // Check chrome.storage for pending data
