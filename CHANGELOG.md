@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.3] - 2025-08-05
+
+### Fixed
+- **Emoji Count Limit**: Fixed issue where background sync was only fetching 5,000 emojis instead of all emojis
+- **Complete Sync**: Now fetches up to 20,000 emojis to match the web app behavior
+- **Consistency**: Aligned emoji count limit across all sync methods
+
+### Technical Improvements
+- Updated fetchFreshEmojiData to use count: 20000 instead of count: 5000
+- Ensures workspaces with many emojis are fully synchronized
+
 ## [1.3.2] - 2025-08-05
 
 ### Added

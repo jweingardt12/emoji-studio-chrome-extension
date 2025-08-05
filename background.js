@@ -204,7 +204,7 @@ async function fetchFreshEmojiData(workspace, workspaceData) {
     // Prepare the request body
     const params = new URLSearchParams({
       token: workspaceData.token || workspaceData.formToken,
-      count: 5000,
+      count: 20000,
       _x_reason: 'customize-emoji-list',
       _x_mode: 'online'
     });
