@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.2] - 2025-08-05
+
+### Added
+- **Loading Overlay on Sync**: Clicking the sync button now shows a loading overlay on the Emoji Studio dashboard
+- **Enhanced Sync UX**: Visual feedback with progress animation during sync process
+- **Automatic Dashboard Opening**: Sync button now automatically opens Emoji Studio after syncing
+
+### Improved
+- Better user experience when syncing from the notification
+- Visual progress indication during sync process
+- Smoother transition from extension to Emoji Studio app
+
+### Technical Improvements
+- Added SYNC_TO_EMOJI_STUDIO_AND_OPEN message type
+- Dashboard detects syncing parameter and shows appropriate loading state
+- Progress simulation with completion detection
+
 ## [1.3.1] - 2025-08-05
 
 ### Added
