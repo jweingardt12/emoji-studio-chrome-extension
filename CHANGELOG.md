@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.9] - 2025-08-05
+
+### Fixed
+- **Toast Emoji Count**: Fixed toast notifications to show non-alias emoji count (matching dashboard display)
+- **Extension Notification Count**: Fixed Chrome extension notifications to show non-alias emoji count
+- **Loading Overlay Count**: Fixed sync loading overlay to show consistent emoji count
+- **Count Consistency**: All emoji count displays now exclude aliases for consistency with dashboard
+
+### Technical Improvements
+- Background script now calculates and broadcasts nonAliasCount in SYNC_COMPLETED messages
+- ChromeExtensionHandler updated to use nonAliasCount when available
+- Added nonAliasCount to sync progress tracking for better analytics
+- inject.js passes through nonAliasCount from background to app
+
+### User Experience
+- Toast notifications now match the emoji count shown on dashboard
+- No more confusion between total emojis (including aliases) and unique emojis
+- Consistent count display across all notifications and UI elements
+
 ## [1.3.8] - 2025-08-05
 
 ### Fixed
