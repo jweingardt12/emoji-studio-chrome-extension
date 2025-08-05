@@ -237,7 +237,6 @@ async function initializeSyncTab() {
   const openEmojiStudioButton = document.getElementById('openEmojiStudio');
   const autoSyncToggle = document.getElementById('autoSyncToggle');
   const syncInterval = document.getElementById('syncInterval');
-  const syncIntervalContainer = document.getElementById('syncIntervalContainer');
   const syncStatus = document.getElementById('syncStatus');
   const syncStatusIndicator = document.getElementById('syncStatusIndicator');
   const syncStatusMessage = document.getElementById('syncStatusMessage');
@@ -269,7 +268,7 @@ async function initializeSyncTab() {
       // Update UI with settings
       autoSyncToggle.checked = settings.autoSyncEnabled;
       syncInterval.value = settings.syncIntervalMinutes || 60;
-      syncIntervalContainer.style.display = settings.autoSyncEnabled ? 'flex' : 'none';
+      syncInterval.style.display = settings.autoSyncEnabled ? 'block' : 'none';
       
       // Update sync status display
       updateSyncStatus(settings);
@@ -394,7 +393,7 @@ async function initializeSyncTab() {
   // Handle auto-sync toggle
   autoSyncToggle.addEventListener('change', async () => {
     const enabled = autoSyncToggle.checked;
-    syncIntervalContainer.style.display = enabled ? 'flex' : 'none';
+    syncInterval.style.display = enabled ? 'block' : 'none';
     
     try {
       await chrome.runtime.sendMessage({

@@ -41,50 +41,46 @@
       <div class="sync-container">
         <!-- Connected State -->
         <div class="connected-state" id="connectedState" style="display: none;">
-          <div class="workspace-status">
-            <div class="status-icon-large">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-              </svg>
+          <div class="workspace-info-compact">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="workspace-icon">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            <div class="workspace-details">
+              <span class="workspace-label">Connected to</span>
+              <span class="workspace-name" id="workspaceName">workspace</span>
             </div>
-            <h3 class="status-title">Connected to Slack</h3>
-            <p class="workspace-name" id="workspaceName">workspace</p>
           </div>
           
-          <div class="sync-info">
-            <div class="sync-item">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="sync-info-compact">
+            <div class="sync-status-row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 6 12 12 16 14"></polyline>
               </svg>
-              <span id="syncStatusText">Last synced just now</span>
+              <span id="syncStatusText" class="sync-status-text">Last synced just now</span>
             </div>
             
-            <!-- Auto-sync settings -->
-            <div class="sync-settings">
-              <label class="sync-toggle">
+            <div class="sync-controls">
+              <label class="sync-toggle-compact">
                 <input type="checkbox" id="autoSyncToggle" checked>
-                <span class="toggle-slider"></span>
-                <span class="toggle-label">Auto-sync enabled</span>
+                <span class="toggle-slider-small"></span>
+                <span class="toggle-label-small">Auto-sync</span>
               </label>
               
-              <div class="sync-interval-container" id="syncIntervalContainer">
-                <label for="syncInterval" class="interval-label">Sync every:</label>
-                <select id="syncInterval" class="interval-select">
-                  <option value="60">1 hour</option>
-                  <option value="120">2 hours</option>
-                  <option value="240">4 hours</option>
-                  <option value="360">6 hours</option>
-                  <option value="720">12 hours</option>
-                  <option value="1440">24 hours</option>
-                </select>
-              </div>
-              
-              <div class="sync-status" id="syncStatus" style="display: none;">
-                <span class="sync-status-indicator" id="syncStatusIndicator"></span>
-                <span class="sync-status-message" id="syncStatusMessage"></span>
-              </div>
+              <select id="syncInterval" class="interval-select-compact">
+                <option value="60">Every hour</option>
+                <option value="120">Every 2 hours</option>
+                <option value="240">Every 4 hours</option>
+                <option value="360">Every 6 hours</option>
+                <option value="720">Every 12 hours</option>
+                <option value="1440">Every 24 hours</option>
+              </select>
+            </div>
+            
+            <div class="sync-status-compact" id="syncStatus" style="display: none;">
+              <span class="sync-status-indicator" id="syncStatusIndicator"></span>
+              <span class="sync-status-message" id="syncStatusMessage"></span>
             </div>
           </div>
         </div>
@@ -110,23 +106,23 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="sync-actions">
-          <button class="button button-secondary" id="refreshData" disabled>
-            <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10"></polyline>
-              <polyline points="1 20 1 14 7 14"></polyline>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            </svg>
-            <span>Refresh Data</span>
-          </button>
-          
-          <button class="button button-primary" id="openEmojiStudio">
+        <div class="sync-actions-vertical">
+          <button class="button button-primary full-width" id="openEmojiStudio">
             <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
               <polyline points="15 3 21 3 21 9"></polyline>
               <line x1="10" y1="14" x2="21" y2="3"></line>
             </svg>
             <span>Open Emoji Studio</span>
+          </button>
+          
+          <button class="button button-secondary full-width" id="refreshData" disabled>
+            <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            <span>Refresh Data</span>
           </button>
         </div>
       </div>
