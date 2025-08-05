@@ -216,7 +216,7 @@ async function syncToEmojiStudio(isAutoSync = false) {
       lastSyncTime: now,
       token: dataToSend.token || dataToSend.formToken || null,
       cookie: dataToSend.cookie || null,
-      version: '1.2.0'
+      version: '1.3.0'
     };
     
     // Chrome storage.local has a 5MB limit which should be enough
