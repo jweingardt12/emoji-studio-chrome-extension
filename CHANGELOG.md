@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.3.0] - 2025-08-05
+
+### Added
+- **100% Background Sync**: Sync now happens completely in the background using Chrome Storage API
+- **No Tab Opening**: Removed all tab-based sync methods - syncing is now invisible to users
+- **Storage-Based Communication**: Emoji Studio can read synced data directly from extension storage
+- **Real-time Updates**: Open Emoji Studio tabs are notified when new data is synced
+
+### Changed
+- Sync mechanism now uses Chrome Storage API instead of opening tabs or API calls
+- Data is stored in chrome.storage.local (5MB limit) which is accessible to Emoji Studio
+- Removed API sync attempts to simplify the sync process
+- Background syncs are now truly silent with no visible browser activity
+
+### Technical Improvements
+- Extension stores emoji data in `emojiStudioSyncData` key in Chrome storage
+- Emoji Studio's inject.js automatically checks for synced data on page load
+- Message passing notifies Emoji Studio tabs when new data is available
+- Complete elimination of tab manipulation for syncing
+
 ## [1.2.0] - 2025-08-05
 
 ### Added

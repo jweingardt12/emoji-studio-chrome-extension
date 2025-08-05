@@ -5,6 +5,34 @@
     return;
   }
   
+  // Function to check for synced data from extension storage
+  async function checkForSyncedData() {
+    try {
+      // Check if extension has synced data available
+      const result = await chrome.storage.local.get(['emojiStudioSyncData', 'emojiStudioSyncMeta']);
+      
+      if (result.emojiStudioSyncData && result.emojiStudioSyncMeta) {
+        console.log('[Inject] Found synced data in extension storage');
+        
+        // Send the synced data to Emoji Studio
+        window.postMessage({
+          type: 'EMOJI_STUDIO_SYNCED_DATA',
+          data: result.emojiStudioSyncData,
+          meta: result.emojiStudioSyncMeta,
+          source: 'extension-storage'
+        }, '*');
+        
+        return true;
+      }
+    } catch (error) {
+      console.error('[Inject] Error checking for synced data:', error);
+    }
+    return false;
+  }
+  
+  // Check for synced data on page load
+  checkForSyncedData();
+  
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);
   
@@ -134,7 +162,12 @@
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
-    if (request.type === 'EMOJI_STUDIO_DATA') {
+    if (request.type === 'EMOJI_DATA_SYNCED') {
+      // Extension notifying us that new data has been synced
+      console.log('[Inject] Received notification of new synced data');
+      checkForSyncedData();
+      sendResponse({ success: true });
+    } else if (request.type === 'EMOJI_STUDIO_DATA') {
       // Forward the data to the page
       sendDataToPage(request.data);
       
@@ -171,6 +204,10 @@
     } else if (event.data.type === 'EMOJI_STUDIO_CLEAR_DATA') {
       // Forward to background script to clear extension data
       chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
+    } else if (event.data.type === 'REQUEST_EXTENSION_SYNC_DATA') {
+      // Emoji Studio requesting synced data
+      console.log('[Inject] Emoji Studio requesting synced data');
+      checkForSyncedData();
     } else if (event.data.type === 'REQUEST_EXTENSION_DATA') {
       // Check chrome.storage for pending data
       chrome.storage.local.get(['pendingExtensionData'], (result) => {

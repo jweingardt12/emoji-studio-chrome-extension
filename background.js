@@ -193,7 +193,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 
-// Function to sync data to Emoji Studio
+// Function to sync data to Emoji Studio using Chrome Storage
 async function syncToEmojiStudio(isAutoSync = false) {
   if (Object.keys(capturedData).length === 0) {
     return { success: false, error: 'No data to sync' };
@@ -206,143 +206,77 @@ async function syncToEmojiStudio(isAutoSync = false) {
   // Update sync state
   await updateSyncState('syncing', now);
   
-  // First, try to sync via API
-  console.log(`Attempting to sync via API (isAutoSync: ${isAutoSync})...`);
-  
-  const apiUrls = [
-    'https://app.emojistudio.xyz/api/sync-from-extension',
-    'https://emojistudio.xyz/api/sync-from-extension'
-  ];
-  
-  // Add localhost for development
-  if (chrome.runtime.getManifest().update_url === undefined) {
-    apiUrls.push('http://localhost:3000/api/sync-from-extension');
-  }
-  
-  let syncSuccess = false;
-  let lastError = null;
-  
-  for (const apiUrl of apiUrls) {
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          workspace: workspace,
-          emojiData: dataToSend.emoji || [],
-          emojiCount: dataToSend.emojiCount || 0,
-          lastFetchTime: dataToSend.lastFetchTime || new Date().toISOString()
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log('API sync successful:', result);
-        chrome.storage.local.set({ lastSyncTime: now });
-        
-        // Update sync state to success
-        await updateSyncState('success', now, now);
-        
-        // Show success notification only for manual syncs
-        if (!isAutoSync) {
-          chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
-            title: 'Emoji Studio Sync',
-            message: `Successfully synced ${dataToSend.emojiCount || 0} emojis to Emoji Studio!`
-          });
-        }
-        
-        syncSuccess = true;
-        break;
+  try {
+    // Store emoji data in Chrome storage for Emoji Studio to read
+    const emojiData = {
+      workspace: workspace,
+      emojiData: dataToSend.emoji || [],
+      emojiCount: dataToSend.emojiCount || 0,
+      lastFetchTime: dataToSend.lastFetchTime || new Date().toISOString(),
+      lastSyncTime: now,
+      token: dataToSend.token || dataToSend.formToken || null,
+      cookie: dataToSend.cookie || null,
+      version: '1.2.0'
+    };
+    
+    // Chrome storage.local has a 5MB limit which should be enough
+    // Store the complete data
+    await chrome.storage.local.set({
+      emojiStudioSyncData: emojiData,
+      emojiStudioSyncMeta: {
+        workspace: workspace,
+        lastSync: now,
+        emojiCount: dataToSend.emojiCount || 0,
+        hasData: true
       }
-    } catch (error) {
-      console.log(`API sync failed for ${apiUrl}:`, error.message);
-      lastError = error.message;
-    }
-  }
-  
-  // If API sync succeeded, we're done
-  if (syncSuccess) {
-    return { success: true };
-  }
-  
-  // Otherwise, fall back to the tab-based method (only for manual syncs)
-  if (!isAutoSync) {
-    console.log('API sync failed, falling back to tab method...');
-    
-    try {
-    // Find Emoji Studio tab or create one
-    const emojiStudioUrl = getEmojiStudioUrl('/?extension=true');
-    const baseUrl = getEmojiStudioUrl('');
-    
-    chrome.tabs.query({ url: [`${baseUrl}/*`] }, (tabs) => {
-      
-      chrome.storage.local.set({ 
-        pendingExtensionData: {
-          ...dataToSend,
-          workspace: workspace
-        },
-        lastSyncTime: now
-      }, () => {
-        if (tabs.length > 0) {
-          // Use existing tab
-          const tabId = tabs[0].id;
-          chrome.tabs.update(tabId, { 
-            url: emojiStudioUrl,
-            active: true
-          }, () => {
-            // Wait for the tab to reload, then send the data directly
-            chrome.tabs.onUpdated.addListener(function listener(updatedTabId, info) {
-              if (updatedTabId === tabId && info.status === 'complete') {
-                chrome.tabs.onUpdated.removeListener(listener);
-                
-                // Small delay to ensure content script is loaded
-                setTimeout(() => {
-                  chrome.tabs.sendMessage(tabId, {
-                    type: 'EMOJI_STUDIO_DATA',
-                    data: dataToSend
-                  });
-                }, 1000);
-              }
-            });
-          });
-        } else {
-          // Create new tab
-          chrome.tabs.create({ 
-            url: emojiStudioUrl 
-          }, (newTab) => {
-            // Wait for the tab to load, then send the data directly
-            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-              if (tabId === newTab.id && info.status === 'complete') {
-                chrome.tabs.onUpdated.removeListener(listener);
-                
-                // Small delay to ensure content script is loaded
-                setTimeout(() => {
-                  chrome.tabs.sendMessage(tabId, {
-                    type: 'EMOJI_STUDIO_DATA',
-                    data: dataToSend
-                  });
-                }, 1000);
-              }
-            });
-          });
-        }
-        
-      });
     });
-    } catch (error) {
-      await updateSyncState('error', now);
-      return { success: false, error: error.message };
+    
+    console.log('Data synced to Chrome storage successfully');
+    chrome.storage.local.set({ lastSyncTime: now });
+    
+    // Update sync state to success
+    await updateSyncState('success', now, now);
+    
+    // Show success notification only for manual syncs
+    if (!isAutoSync) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Emoji Studio Sync',
+        message: `Successfully synced ${dataToSend.emojiCount || 0} emojis!`
+      });
     }
-  } else {
-    // For auto-sync, don't open tabs, just mark as failed
+    
+    // Send message to any open Emoji Studio tabs to notify them of new data
+    const emojiStudioUrls = [
+      'https://app.emojistudio.xyz/*',
+      'https://emojistudio.xyz/*',
+      'http://localhost:3002/*',
+      'http://localhost:3000/*'
+    ];
+    
+    for (const pattern of emojiStudioUrls) {
+      chrome.tabs.query({ url: pattern }, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'EMOJI_DATA_SYNCED',
+            workspace: workspace,
+            emojiCount: dataToSend.emojiCount || 0
+          }).catch(() => {
+            // Tab might not have content script, that's ok
+          });
+        });
+      });
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to sync to Chrome storage:', error);
     await updateSyncState('error', now);
-    console.log('Auto-sync failed: API not reachable');
-    return { success: false, error: lastError || 'API not reachable' };
+    return { success: false, error: error.message };
   }
+  
+  // No longer need API or tab-based sync - Chrome storage is always available
 }
 
 // Function to update sync state in storage
@@ -614,6 +548,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           syncState: 'idle'
         }
       });
+    });
+    return true;
+  } else if (request.type === 'GET_EMOJI_STUDIO_DATA') {
+    // Allow Emoji Studio to request synced data directly
+    chrome.storage.local.get(['emojiStudioSyncData', 'emojiStudioSyncMeta'], (result) => {
+      if (result.emojiStudioSyncData) {
+        sendResponse({ 
+          success: true, 
+          data: result.emojiStudioSyncData,
+          meta: result.emojiStudioSyncMeta 
+        });
+      } else {
+        sendResponse({ 
+          success: false, 
+          error: 'No synced data available' 
+        });
+      }
     });
     return true;
   } else if (request.type === 'SHOW_NOTIFICATION') {
