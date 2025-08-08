@@ -52,11 +52,22 @@
   // Function to check for synced data from extension storage
   async function checkForSyncedData() {
     try {
+      console.log('[Inject] Checking chrome.storage.local for sync data...');
+      
       // Check if extension has synced data available
       const result = await chrome.storage.local.get(['emojiStudioSyncData', 'emojiStudioSyncMeta']);
       
+      console.log('[Inject] Storage check result:', {
+        hasSyncData: !!result.emojiStudioSyncData,
+        hasSyncMeta: !!result.emojiStudioSyncMeta,
+        emojiCount: result.emojiStudioSyncMeta?.emojiCount || 0,
+        workspace: result.emojiStudioSyncMeta?.workspace || 'none'
+      });
+      
       if (result.emojiStudioSyncData && result.emojiStudioSyncMeta) {
-        console.log('[Inject] Found synced data in extension storage');
+        console.log('[Inject] Found synced data in extension storage, posting to window');
+        console.log('[Inject] Emoji count:', result.emojiStudioSyncData.emojiCount);
+        console.log('[Inject] Workspace:', result.emojiStudioSyncData.workspace);
         
         // Send the synced data to Emoji Studio
         window.postMessage({
@@ -67,6 +78,8 @@
         }, '*');
         
         return true;
+      } else {
+        console.log('[Inject] No sync data found in chrome.storage.local');
       }
     } catch (error) {
       console.error('[Inject] Error checking for synced data:', error);
@@ -75,7 +88,6 @@
   }
   
   // Check for synced data on page load with a small delay to ensure page is ready
-  // But don't auto-check if sync is starting (to avoid sending stale data)
   const urlParams = new URLSearchParams(window.location.search);
   const syncStarting = urlParams.get('syncStarting') === 'true';
   
@@ -84,7 +96,22 @@
       checkForSyncedData();
     }, 500);
   } else {
-    console.log('[Inject] Sync is starting, skipping auto-check for synced data');
+    console.log('[Inject] Sync is starting, will check for fresh sync data');
+    // When syncStarting=true, we're coming from the extension's sync button
+    // Wait a bit for the data to be written, then check
+    setTimeout(() => {
+      console.log('[Inject] First check for fresh sync data...');
+      checkForSyncedData().then(found => {
+        if (!found) {
+          // Try again after another delay
+          console.log('[Inject] Data not found, retrying in 1 second...');
+          setTimeout(() => {
+            console.log('[Inject] Second check for fresh sync data...');
+            checkForSyncedData();
+          }, 1000);
+        }
+      });
+    }, 1500);
   }
   
   // Listen for sync progress messages from background script

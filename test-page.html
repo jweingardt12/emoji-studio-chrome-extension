@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome Extension Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+        }
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #666;
+        }
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .image-item {
+            text-align: center;
+        }
+        .image-item img, .image-item video {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid #eee;
+            border-radius: 4px;
+        }
+        .image-item p {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        .instructions {
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Chrome Extension Test Page</h1>
+    
+    <div class="instructions">
+        <strong>Instructions:</strong> Right-click on any image below and select "Create Slack emoji" from the context menu.
+        The extension should open Emoji Studio with the image loaded.
+    </div>
+
+    <div class="test-section">
+        <h2>Test 1: Static Images</h2>
+        <p>These are regular PNG/JPG images. Should load directly in Emoji Studio.</p>
+        <div class="image-grid">
+            <div class="image-item">
+                <img src="https://picsum.photos/200/200?random=1" alt="Random Image 1">
+                <p>Random PNG (200x200)</p>
+            </div>
+            <div class="image-item">
+                <img src="https://picsum.photos/150/150?random=2" alt="Random Image 2">
+                <p>Random JPG (150x150)</p>
+            </div>
+            <div class="image-item">
+                <img src="https://via.placeholder.com/128x128/FF6B6B/FFFFFF?text=Test" alt="Placeholder">
+                <p>Placeholder (128x128)</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Animated GIFs</h2>
+        <p>These GIFs should trigger the frame editor if they're larger than 128x128 or over 128KB.</p>
+        <div class="image-grid">
+            <div class="image-item">
+                <img src="https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif" alt="The Office GIF">
+                <p>The Office GIF (Large)</p>
+            </div>
+            <div class="image-item">
+                <img src="https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif" alt="Minion GIF">
+                <p>Minion GIF (Animated)</p>
+            </div>
+            <div class="image-item">
+                <img src="https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif" alt="Cat GIF">
+                <p>Cat Typing GIF</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Small GIF (Should NOT trigger frame editor)</h2>
+        <div class="image-grid">
+            <div class="image-item">
+                <img src="https://via.placeholder.com/64x64/4CAF50/FFFFFF?text=Small" alt="Small Image">
+                <p>Small Image (64x64)</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 4: Video Elements</h2>
+        <p>Right-clicking on videos should also work and trigger the frame extractor.</p>
+        <div class="image-grid">
+            <div class="image-item">
+                <video width="200" controls poster="https://via.placeholder.com/200x200/2196F3/FFFFFF?text=Video">
+                    <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+                <p>Sample MP4 Video</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 5: Data URLs</h2>
+        <p>Testing with base64 encoded images.</p>
+        <div class="image-grid">
+            <div class="image-item">
+                <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==" alt="Red Dot">
+                <p>Tiny Red Dot (Data URL)</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Log when context menu is opened
+        document.addEventListener('contextmenu', function(e) {
+            if (e.target.tagName === 'IMG' || e.target.tagName === 'VIDEO') {
+                console.log('Right-clicked on:', e.target.tagName, e.target.src);
+            }
+        });
+    </script>
+</body>
+</html>

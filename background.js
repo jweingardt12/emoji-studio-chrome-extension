@@ -55,12 +55,12 @@ async function broadcastToEmojiStudioTabs(message) {
 
 // Environment configuration
 const EMOJI_STUDIO_URLS = {
-  development: 'http://localhost:3002',
+  development: 'http://localhost:3001',
   production: 'https://app.emojistudio.xyz'
 };
 
 // Force production mode - set this to true to always use production URLs
-const FORCE_PRODUCTION = true; // Set to true for production release
+const FORCE_PRODUCTION = false; // Set to true for production release
 
 // Set environment based on FORCE_PRODUCTION flag
 let currentEnvironment = FORCE_PRODUCTION ? 'production' : 'development';
@@ -356,16 +356,28 @@ chrome.runtime.onInstalled.addListener(() => {
     }
   });
   
-  // Create context menu for images, gifs, and videos
-  chrome.contextMenus.create({
-    id: 'createSlackEmoji',
-    title: 'Create Slack emoji',
-    contexts: ['image', 'video', 'audio'], // Added audio for completeness
-    documentUrlPatterns: ['http://*/*', 'https://*/*']
-  });
+  // Context menu will be created by the startup code below
   
   // Also check immediately
   checkAndAutoSync();
+});
+
+// Create or update context menu on startup
+// Use removeAll to clear any existing menus first
+chrome.contextMenus.removeAll(() => {
+  // Now create the menu
+  chrome.contextMenus.create({
+    id: 'createSlackEmoji',
+    title: 'Create Slack emoji',
+    contexts: ['image', 'video'],
+    documentUrlPatterns: ['<all_urls>']
+  }, () => {
+    if (chrome.runtime.lastError) {
+      console.log('Error creating context menu:', chrome.runtime.lastError);
+    } else {
+      console.log('Context menu created on startup');
+    }
+  });
 });
 
 // Also load data on startup (not just on install)
@@ -1913,22 +1925,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   
   if (info.menuItemId === 'createSlackEmoji') {
     
-    // Check if user is authenticated
-    if (Object.keys(capturedData).length === 0) {
-      // Show notification that user needs to connect Slack first
-      chrome.notifications.create({
-        type: 'basic',
-        iconUrl: 'icons/icon128.png',
-        title: 'Connect Slack First',
-        message: 'Please connect your Slack workspace before creating emojis. Click the extension icon to get started.'
-      });
-      return;
-    }
-    
     const imageUrl = info.srcUrl;
     const pageUrl = info.pageUrl;
-    const workspace = Object.keys(capturedData)[0]; // Use first workspace
-    const data = capturedData[workspace];
+    
+    // Get workspace data if available (optional now)
+    const workspace = Object.keys(capturedData).length > 0 ? Object.keys(capturedData)[0] : null;
+    const data = workspace ? capturedData[workspace] : null;
     
     
     try {
@@ -2316,10 +2318,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 // Update context menu visibility based on authentication status
 function updateContextMenu() {
-  const hasAuth = Object.keys(capturedData).length > 0;
+  // Always enable the context menu - we don't require Slack auth anymore
   chrome.contextMenus.update('createSlackEmoji', {
-    enabled: hasAuth,
-    title: hasAuth ? 'Create Slack emoji' : 'Create Slack emoji (Connect Slack first)'
+    enabled: true,
+    title: 'Create Slack emoji'
   });
 }
 

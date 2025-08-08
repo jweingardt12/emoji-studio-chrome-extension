@@ -2,12 +2,12 @@
 
 // Environment configuration
 const EMOJI_STUDIO_URLS = {
-  development: 'http://localhost:3002',
+  development: 'http://localhost:3001',
   production: 'https://app.emojistudio.xyz'
 };
 
 // Force production mode - set this to true to always use production URLs
-const FORCE_PRODUCTION = true; // Set to true for production release
+const FORCE_PRODUCTION = false; // Set to true for production release
 
 // Set environment based on FORCE_PRODUCTION flag
 let currentEnvironment = FORCE_PRODUCTION ? 'production' : 'development';

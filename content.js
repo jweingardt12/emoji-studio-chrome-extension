@@ -39,6 +39,216 @@ function checkIfLoggedIn() {
 // Check authentication status on page load
 setTimeout(checkIfLoggedIn, 1000);
 
+// Check if we're on the emoji customization page and show a prompt
+function checkEmojiPage() {
+  const isEmojiPage = window.location.pathname.includes('/customize/emoji');
+  console.log('[Emoji Studio Extension] Page check - Is emoji page?', isEmojiPage, 'Path:', window.location.pathname);
+  
+  if (isEmojiPage && !hasShownNotification) {
+    console.log('[Emoji Studio Extension] On emoji customization page, checking for data...');
+    
+    // Get the workspace from the URL
+    const workspace = extractWorkspace();
+    if (!workspace) {
+      console.log('[Emoji Studio Extension] Could not extract workspace from URL');
+      return;
+    }
+    
+    // Ask background script to check if we have emoji data
+    chrome.runtime.sendMessage({ 
+      type: 'CHECK_EMOJI_PAGE', 
+      workspace: workspace 
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('[Emoji Studio Extension] Error checking data:', chrome.runtime.lastError);
+        return;
+      }
+      
+      console.log('[Emoji Studio Extension] Data check response:', response);
+      
+      if (response.hasEmojis && response.emojiCount > 0) {
+        // We have emoji data - show green sync notification
+        console.log('[Emoji Studio Extension] Found emoji data:', response.emojiCount, 'emojis');
+        if (!hasShownNotification) {
+          hasShownNotification = true;
+          showNotification(`${response.emojiCount} emojis ready`);
+        }
+      } else if (response.hasData) {
+        // We have auth but no emojis - might be fetching
+        console.log('[Emoji Studio Extension] Have auth data but no emojis yet');
+        // Wait a bit and check again
+        setTimeout(() => {
+          if (!hasShownNotification) {
+            checkEmojiPage();
+          }
+        }, 2000);
+      } else {
+        // No data at all - show refresh prompt
+        console.log('[Emoji Studio Extension] No data captured yet');
+        if (!hasShownNotification) {
+          hasShownNotification = true;
+          showPromptNotification();
+        }
+      }
+    });
+  }
+}
+
+// Show a prompt to refresh the page to capture data
+function showPromptNotification() {
+  const existingNotification = document.querySelector('.emoji-studio-notification');
+  if (existingNotification) {
+    existingNotification.remove();
+  }
+  
+  const notification = document.createElement('div');
+  notification.className = 'emoji-studio-notification';
+  notification.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M23 4v6h-6"></path>
+        <path d="M1 20v-6h6"></path>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+      </svg>
+      <span style="font-size: 12px;">Fetch & sync emojis</span>
+      <button class="emoji-studio-refresh-btn" style="
+        background: rgba(255, 255, 255, 0.15);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        padding: 3px 8px;
+        font-size: 10px;
+        border-radius: 2px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        margin-left: 4px;
+        font-weight: 500;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+      ">
+        Sync
+      </button>
+    </div>
+  `;
+  notification.style.cssText = `
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    background: #15803d;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(21, 128, 61, 0.15);
+    z-index: 10000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 11px;
+    line-height: 1.2;
+    animation: slideIn 0.2s ease-out;
+  `;
+  
+  document.body.appendChild(notification);
+  
+  // Add click handler for sync button
+  const refreshBtn = notification.querySelector('.emoji-studio-refresh-btn');
+  refreshBtn.addEventListener('click', () => {
+    // Change button text to show loading
+    refreshBtn.textContent = 'Loading...';
+    refreshBtn.disabled = true;
+    
+    // Trigger a page refresh to capture auth data, then sync
+    // First, set a flag that we want to auto-sync after refresh
+    sessionStorage.setItem('emojiStudioAutoSync', 'true');
+    window.location.reload();
+  });
+  
+  // Auto-hide after 10 seconds
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.style.animation = 'slideOut 0.2s ease-out forwards';
+      setTimeout(() => notification.remove(), 300);
+    }
+  }, 10000);
+}
+
+// Check if we should auto-sync after refresh
+function checkAutoSync() {
+  if (sessionStorage.getItem('emojiStudioAutoSync') === 'true') {
+    console.log('[Emoji Studio Extension] Auto-sync flag detected, waiting for data capture...');
+    sessionStorage.removeItem('emojiStudioAutoSync');
+    
+    // Show a loading notification
+    const notification = document.createElement('div');
+    notification.className = 'emoji-studio-notification';
+    notification.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 2v4m0 12v4m-8-8h4m12 0h4" stroke-linecap="round" style="animation: spin 1s linear infinite; transform-origin: center;"></path>
+        </svg>
+        <span style="font-size: 12px;">Fetching emojis...</span>
+      </div>
+    `;
+    notification.style.cssText = `
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: #0284c7;
+      color: white;
+      padding: 6px 10px;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(2, 132, 199, 0.15);
+      z-index: 10000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 11px;
+      line-height: 1.2;
+      animation: slideIn 0.2s ease-out;
+    `;
+    
+    // Add spinning animation
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(notification);
+    
+    // Wait a bit for data to be captured, then trigger sync
+    setTimeout(() => {
+      console.log('[Emoji Studio Extension] Auto-triggering sync...');
+      chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO_AND_OPEN' });
+      
+      // Update notification
+      notification.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span style="font-size: 12px;">Opening Emoji Studio...</span>
+        </div>
+      `;
+      notification.style.background = '#15803d';
+      
+      // Remove notification after a moment
+      setTimeout(() => notification.remove(), 2000);
+    }, 3000); // Wait 3 seconds for auth capture
+  }
+}
+
+// Check on page load and when URL changes
+checkAutoSync();
+checkEmojiPage();
+
+// Also check when the URL changes (for SPAs)
+let lastUrl = window.location.href;
+setInterval(() => {
+  if (window.location.href !== lastUrl) {
+    lastUrl = window.location.href;
+    hasShownNotification = false; // Reset for new page
+    checkEmojiPage();
+  }
+}, 1000);
+
 function extractDataFromHeaders(headers, url) {
   const data = {
     workspace: extractWorkspace(),
