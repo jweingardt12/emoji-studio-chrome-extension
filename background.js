@@ -170,6 +170,7 @@ async function checkForNewEmojis() {
       trackEvent('Extension: New Emoji Notification Shown', {
         emojiCount: newEmojiNames.length,
         workspace: workspace,
+        extensionVersion: chrome.runtime.getManifest().version,
         emojis: newEmojiNames.slice(0, 5) // Only track first 5 for privacy
       });
     } else {
@@ -541,6 +542,13 @@ async function syncToEmojiStudio(isAutoSync = false) {
       timestamp: Date.now() 
     });
     
+    // Track sync error
+    trackEvent('Extension: Fetch Emojis Failed', {
+      error: 'No data to sync',
+      extensionVersion: chrome.runtime.getManifest().version,
+      isAutoSync: isAutoSync
+    });
+    
     return { success: false, error: 'No data to sync' };
   }
   
@@ -557,6 +565,13 @@ async function syncToEmojiStudio(isAutoSync = false) {
     type: 'SYNC_STARTED', 
     workspace: workspace,
     timestamp: now 
+  });
+  
+  // Track sync start
+  trackEvent('Extension: Fetch Emojis Started', {
+    workspace: workspace,
+    extensionVersion: chrome.runtime.getManifest().version,
+    isAutoSync: isAutoSync
   });
   
   // Update sync state
@@ -622,6 +637,15 @@ async function syncToEmojiStudio(isAutoSync = false) {
       timestamp: now 
     });
     
+    // Track successful sync
+    trackEvent('Extension: Fetch Emojis Success', {
+      workspace: workspace,
+      emojiCount: dataToSend.emojiCount || 0,
+      nonAliasCount: nonAliasCount,
+      extensionVersion: chrome.runtime.getManifest().version,
+      isAutoSync: isAutoSync
+    });
+    
     // Show success notification only for manual syncs
     if (!isAutoSync) {
       chrome.notifications.create({
@@ -665,6 +689,14 @@ async function syncToEmojiStudio(isAutoSync = false) {
       workspace: workspace || 'unknown',
       error: error.message,
       timestamp: now 
+    });
+    
+    // Track sync error
+    trackEvent('Extension: Fetch Emojis Failed', {
+      workspace: workspace || 'unknown',
+      error: error.message,
+      extensionVersion: chrome.runtime.getManifest().version,
+      isAutoSync: isAutoSync
     });
     
     return { success: false, error: error.message };
@@ -2316,7 +2348,8 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
       // Track notification click
       trackEvent('Extension: New Emoji Notification Clicked', {
         emojiCount: notificationData.count,
-        source: 'notification_body'
+        source: 'notification_body',
+        extensionVersion: chrome.runtime.getManifest().version
       });
       
       // Open Emoji Studio Explorer with filter for recent emojis
@@ -2347,7 +2380,8 @@ chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIn
       // Track button click
       trackEvent('Extension: New Emoji Notification Clicked', {
         emojiCount: notificationData.count,
-        source: 'notification_button'
+        source: 'notification_button',
+        extensionVersion: chrome.runtime.getManifest().version
       });
       
       const timestamp = notificationData.timestamp || Date.now() / 1000;
