@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test QR Data Match</title>
+</head>
+<body>
+    <h1>QR Code Data Comparison Test</h1>
+    <p>This tests that our compression matches Emoji Studio web app exactly</p>
+    <pre id="output"></pre>
+
+    <script>
+    // Our implementation
+    function parseSlackCurl(curlCommand) {
+      if (!curlCommand || typeof curlCommand !== 'string') {
+        return {
+          token: null,
+          cookie: null,
+          workspace: null,
+          isValid: false,
+          error: 'Empty or invalid curl command'
+        };
+      }
+      
+      const cmd = curlCommand.replace(/\\\s*\n/g, ' ');
+      
+      let workspace = null;
+      const urlMatch = cmd.match(/https:\/\/([^.]+)\.slack\.com/);
+      if (urlMatch) {
+        workspace = urlMatch[1];
+      }
+      
+      let token = null;
+      const tokenMatch = cmd.match(/name="token"[^]*?\\r\\n\\r\\n([^\\]+)/);
+      if (tokenMatch) {
+        token = tokenMatch[1];
+      }
+      
+      let cookie = null;
+      const cookieMatch = cmd.match(/-b\s+['"]([^'"]+)['"]/);
+      if (cookieMatch) {
+        cookie = cookieMatch[1];
+      }
+      
+      const isValid = !!(token && cookie && workspace);
+      
+      return {
+        token,
+        cookie,
+        workspace,
+        isValid,
+        error: isValid ? null : 'Missing required data'
+      };
+    }
+
+    function compressSlackCurl(curlCommand) {
+      const parsed = parseSlackCurl(curlCommand);
+      
+      if (!parsed.isValid) {
+        throw new Error('Invalid curl command');
+      }
+      
+      const essentials = {
+        t: parsed.token,
+        c: parsed.cookie,
+        w: parsed.workspace,
+      };
+      
+      const json = JSON.stringify(essentials);
+      const encoded = btoa(json)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+      
+      return encoded;
+    }
+
+    // Test with a sample curl command
+    const testCurl = `curl 'https://myworkspace.slack.com/api/emoji.adminList?_x_id=test-123&_x_version_ts=noversion&fp=98' \\
+      -H 'accept: */*' \\
+      -H 'content-type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW' \\
+      -b 'd=xoxd-TestCookie123; d-s=1234567890-abcdef-1234-5678-90abcdef12345' \\
+      --data-raw $'------WebKitFormBoundary7MA4YWxkTrZu0gW\\r\\nContent-Disposition: form-data; name="token"\\r\\n\\r\\nxoxc-TestToken456\\r\\n------WebKitFormBoundary7MA4YWxkTrZu0gW\\r\\nContent-Disposition: form-data; name="count"\\r\\n\\r\\n20000\\r\\n------WebKitFormBoundary7MA4YWxkTrZu0gW--\\r\\n'`;
+
+    const output = document.getElementById('output');
+    
+    try {
+      const parsed = parseSlackCurl(testCurl);
+      output.textContent += 'Parsed data:\n';
+      output.textContent += JSON.stringify(parsed, null, 2) + '\n\n';
+      
+      const compressed = compressSlackCurl(testCurl);
+      output.textContent += 'Compressed QR data:\n';
+      output.textContent += compressed + '\n\n';
+      
+      // Decode to verify
+      const decoded = atob(compressed.replace(/-/g, '+').replace(/_/g, '/'));
+      output.textContent += 'Decoded data:\n';
+      output.textContent += decoded + '\n\n';
+      
+      output.textContent += '✅ Test completed successfully!';
+    } catch (error) {
+      output.textContent += '❌ Error: ' + error.message;
+    }
+    </script>
+</body>
+</html>

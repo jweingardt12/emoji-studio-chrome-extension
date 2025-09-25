@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test QR Compression</title>
+</head>
+<body>
+    <h1>QR Code Compression Test</h1>
+    <p>Open the console to see test results</p>
+
+    <script>
+    // Test compression function (copied from popup.js)
+    function compressCurl(token, cookie, workspace) {
+        const essentials = {
+            t: token,
+            c: cookie,
+            w: workspace,
+        };
+        
+        const json = JSON.stringify(essentials);
+        const encoded = btoa(json)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+        
+        return encoded;
+    }
+
+    // Test decompression function (matching Emoji Studio)
+    function decompressCurl(compressed) {
+        try {
+            // Restore base64 padding if needed
+            const padding = compressed.length % 4;
+            const padded = compressed + (padding ? '='.repeat(4 - padding) : '');
+            
+            // Convert from URL-safe base64
+            const base64 = padded
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+            
+            // Decode and parse
+            const json = atob(base64);
+            const essentials = JSON.parse(json);
+            
+            return essentials;
+        } catch (e) {
+            console.error('Failed to decompress:', e);
+            return null;
+        }
+    }
+
+    // Run tests
+    console.log('Testing QR Code Compression...');
+    
+    const testData = {
+        token: 'xoxc-123456789-987654321-1234567890123-abcdef1234567890abcdef1234567890',
+        cookie: 'd=xoxd-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890%2B%2F%3D%3D; d-s=1234567890-abcdef-1234-5678-90abcdef12345',
+        workspace: 'myworkspace'
+    };
+    
+    console.log('Original data:', testData);
+    
+    const compressed = compressCurl(testData.token, testData.cookie, testData.workspace);
+    console.log('Compressed:', compressed);
+    console.log('Compressed length:', compressed.length);
+    
+    const decompressed = decompressCurl(compressed);
+    console.log('Decompressed:', decompressed);
+    
+    // Verify
+    if (decompressed && 
+        decompressed.t === testData.token && 
+        decompressed.c === testData.cookie && 
+        decompressed.w === testData.workspace) {
+        console.log('✅ Compression/Decompression works correctly!');
+    } else {
+        console.error('❌ Compression/Decompression failed!');
+    }
+    </script>
+</body>
+</html>

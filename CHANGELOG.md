@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.6.0] - 2025-09-25
+
+### Added
+- Mobile Connection tab to share workspaces with the iOS app via QR code
+- QR codes compress Slack auth payloads for smaller, faster scans
+- Direct TestFlight link to help users join the iOS beta quickly
+
+### Improved
+- Streamlined mobile tab copy and layout
+- Clearer error handling around QR generation and scanning
+
 ## [1.4.0] - 2025-08-05
 
 ### Added

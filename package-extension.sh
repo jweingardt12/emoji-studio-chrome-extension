@@ -1,14 +1,17 @@
 #!/bin/bash
 
+# Get version from manifest.json
+VERSION=$(grep '"version"' manifest.json | sed 's/.*"version": "\(.*\)".*/\1/')
+
 # Package Chrome Extension for Release
-echo "Packaging Emoji Studio Chrome Extension v1.4.0..."
+echo "Packaging Emoji Studio Chrome Extension v${VERSION}..."
 
 # Create a clean dist directory
 rm -rf dist
 mkdir -p dist
 
 # Create the zip file excluding unnecessary files
-zip -r dist/emoji-studio-extension-v1.4.0.zip . \
+zip -r dist/emoji-studio-extension-v${VERSION}.zip . \
   -x ".*" \
   -x "*.sh" \
   -x "*.md" \
@@ -23,7 +26,7 @@ zip -r dist/emoji-studio-extension-v1.4.0.zip . \
   -x "package-lock.json"
 
 echo "✅ Extension packaged successfully!"
-echo "📦 Output: dist/emoji-studio-extension-v1.4.0.zip"
+echo "📦 Output: dist/emoji-studio-extension-v${VERSION}.zip"
 echo ""
 echo "Next steps:"
 echo "1. Upload to Chrome Web Store Developer Dashboard"
