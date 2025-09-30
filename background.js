@@ -4,30 +4,7 @@ let lastNotificationTime = {}; // Track last notification time per workspace
 let emojiCart = []; // Cart to store emojis before adding to Emoji Studio
 let lastEmojiCheckData = {}; // Track last emoji check data for new emoji detection
 
-// Simple analytics tracking function
-async function trackEvent(eventName, properties = {}) {
-  try {
-    // Send event to all open Emoji Studio tabs for tracking
-    const tabs = await chrome.tabs.query({
-      url: ['https://app.emojistudio.xyz/*', 'https://emojistudio.xyz/*', 'https://localhost:3001/*', 'https://localhost:3002/*']
-    });
-    
-    for (const tab of tabs) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: 'TRACK_EVENT',
-          eventName: eventName,
-          properties: properties
-        });
-        break; // Only need to send to one tab
-      } catch (error) {
-        // Tab might not have content script loaded, ignore
-      }
-    }
-  } catch (error) {
-    // Silent fail - analytics shouldn't break functionality
-  }
-}
+// Analytics tracking removed for privacy
 
 // Function to broadcast messages to all Emoji Studio tabs
 async function broadcastToEmojiStudioTabs(message) {
@@ -153,14 +130,6 @@ async function checkForNewEmojis() {
         buttons: [{ title: 'View in Emoji Studio' }],
         requireInteraction: false
       });
-      
-      // Track notification shown
-      trackEvent('Extension: New Emojis Notification Shown', {
-        newEmojiCount: newEmojiNames.length,
-        emojiNames: newEmojiNames.slice(0, 10), // First 10 names
-        workspace: workspace,
-        extensionVersion: chrome.runtime.getManifest().version
-      });
 
       // Store notification data for click handler
       await chrome.storage.local.set({
@@ -173,14 +142,6 @@ async function checkForNewEmojis() {
       });
 
       console.log(`[Notifications] Showed notification for ${newEmojiNames.length} new emojis`);
-      
-      // Track notification shown
-      trackEvent('Extension: New Emoji Notification Shown', {
-        emojiCount: newEmojiNames.length,
-        workspace: workspace,
-        extensionVersion: chrome.runtime.getManifest().version,
-        emojis: newEmojiNames.slice(0, 5) // Only track first 5 for privacy
-      });
     } else {
       console.log('[Notifications] No new emojis found');
     }
@@ -560,14 +521,7 @@ async function syncToEmojiStudio(isAutoSync = false) {
       error: 'No data to sync. Please visit a Slack emoji page first.',
       timestamp: Date.now() 
     });
-    
-    // Track sync error
-    trackEvent('Extension: Fetch Emojis Failed', {
-      error: 'No data to sync',
-      extensionVersion: chrome.runtime.getManifest().version,
-      isAutoSync: isAutoSync
-    });
-    
+
     return { success: false, error: 'No data to sync' };
   }
   
@@ -584,13 +538,6 @@ async function syncToEmojiStudio(isAutoSync = false) {
     type: 'SYNC_STARTED', 
     workspace: workspace,
     timestamp: now 
-  });
-  
-  // Track sync start
-  trackEvent('Extension: Fetch Emojis Started', {
-    workspace: workspace,
-    extensionVersion: chrome.runtime.getManifest().version,
-    isAutoSync: isAutoSync
   });
   
   // Update sync state
@@ -655,16 +602,7 @@ async function syncToEmojiStudio(isAutoSync = false) {
       nonAliasCount: nonAliasCount,
       timestamp: now 
     });
-    
-    // Track successful sync
-    trackEvent('Extension: Fetch Emojis Success', {
-      workspace: workspace,
-      emojiCount: dataToSend.emojiCount || 0,
-      nonAliasCount: nonAliasCount,
-      extensionVersion: chrome.runtime.getManifest().version,
-      isAutoSync: isAutoSync
-    });
-    
+
     // Show success notification only for manual syncs
     if (!isAutoSync) {
       chrome.notifications.create({
@@ -709,15 +647,7 @@ async function syncToEmojiStudio(isAutoSync = false) {
       error: error.message,
       timestamp: now 
     });
-    
-    // Track sync error
-    trackEvent('Extension: Fetch Emojis Failed', {
-      workspace: workspace || 'unknown',
-      error: error.message,
-      extensionVersion: chrome.runtime.getManifest().version,
-      isAutoSync: isAutoSync
-    });
-    
+
     return { success: false, error: error.message };
   }
   
@@ -752,12 +682,7 @@ async function updateSyncState(state, lastAttempt = null, lastSuccess = null) {
 // Function to perform auto-sync
 async function checkAndAutoSync() {
   console.log('Checking for auto-sync...');
-  
-  // Track auto-sync check
-  trackEvent('Extension: Auto-Sync Check', {
-    extensionVersion: chrome.runtime.getManifest().version
-  });
-  
+
   // Load fresh data from storage
   const result = await chrome.storage.local.get(['slackData', 'syncSettings', 'lastSyncTime']);
   
@@ -2381,13 +2306,6 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
     const { [storageKey]: notificationData } = await chrome.storage.local.get(storageKey);
     
     if (notificationData) {
-      // Track notification click
-      trackEvent('Extension: New Emoji Notification Clicked', {
-        emojiCount: notificationData.count,
-        source: 'notification_body',
-        extensionVersion: chrome.runtime.getManifest().version
-      });
-      
       // Open Emoji Studio Explorer with filter for recent emojis
       const timestamp = notificationData.timestamp || Date.now() / 1000;
       const explorerUrl = getEmojiStudioUrl(`/explorer?since=${Math.floor(timestamp - 86400)}`); // Show last 24 hours
@@ -2413,13 +2331,6 @@ chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIn
     const { [storageKey]: notificationData } = await chrome.storage.local.get(storageKey);
     
     if (notificationData) {
-      // Track button click
-      trackEvent('Extension: New Emoji Notification Clicked', {
-        emojiCount: notificationData.count,
-        source: 'notification_button',
-        extensionVersion: chrome.runtime.getManifest().version
-      });
-      
       const timestamp = notificationData.timestamp || Date.now() / 1000;
       const explorerUrl = getEmojiStudioUrl(`/explorer?since=${Math.floor(timestamp - 86400)}`);
       

@@ -116,14 +116,7 @@
   
   // Listen for sync progress messages from background script
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'TRACK_EVENT') {
-      // Forward tracking event to Emoji Studio
-      window.postMessage({
-        type: 'EXTENSION_TRACK_EVENT',
-        eventName: message.eventName,
-        properties: message.properties
-      }, '*');
-    } else if (message.type === 'SYNC_STARTED') {
+    if (message.type === 'SYNC_STARTED') {
       console.log('[Inject] Sync started for workspace:', message.workspace);
       window.postMessage({
         type: 'EMOJI_STUDIO_SYNC_PROGRESS',

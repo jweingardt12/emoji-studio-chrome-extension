@@ -12,10 +12,7 @@
       <div class="logo">
         <img src="logo.png" alt="Emoji Studio" class="logo-img">
       </div>
-      <div>
-        <h1 class="title">Emoji Studio</h1>
-        <p class="subtitle">for Slack</p>
-      </div>
+      <h1 class="title">Emoji Studio</h1>
     </header>
 
     <!-- Tab Navigation -->
@@ -52,90 +49,84 @@
     <div class="tab-content active" id="syncTab">
       <div class="sync-container">
         <!-- Connected State -->
-        <div class="connected-state" id="connectedState" style="display: none;">
-          <div class="workspace-info-compact">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="workspace-icon">
+        <div class="sync-card" id="connectedState" style="display: none;">
+          <!-- Workspace Info -->
+          <div class="sync-card-header">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="workspace-icon">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
               <polyline points="22 4 12 14.01 9 11.01"></polyline>
             </svg>
-            <div class="workspace-details">
-              <span class="workspace-label">Connected to</span>
-              <span class="workspace-name" id="workspaceName">workspace</span>
-            </div>
+            <span class="workspace-name" id="workspaceName">workspace</span>
           </div>
-          
-          <div class="sync-info-compact">
-            <div class="sync-status-row">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12 6 12 12 16 14"></polyline>
+
+          <!-- Sync Status -->
+          <div class="sync-status-text" id="syncStatusText">Last synced just now</div>
+
+          <!-- Auto-sync Controls -->
+          <div class="sync-controls">
+            <label class="sync-toggle">
+              <input type="checkbox" id="autoSyncToggle" checked>
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">Auto-sync</span>
+            </label>
+
+            <select id="syncInterval" class="interval-select">
+              <option value="60">Every hour</option>
+              <option value="120">Every 2 hours</option>
+              <option value="240">Every 4 hours</option>
+              <option value="360">Every 6 hours</option>
+              <option value="720">Every 12 hours</option>
+              <option value="1440">Every 24 hours</option>
+            </select>
+          </div>
+
+          <!-- Status Message -->
+          <div class="sync-status-message-area" id="syncStatus">
+            <span class="sync-status-indicator" id="syncStatusIndicator" style="display: none;"></span>
+            <span class="sync-status-message" id="syncStatusMessage"></span>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="sync-card-actions">
+            <button class="button button-primary full-width" id="openEmojiStudio">
+              <span>Open Emoji Studio</span>
+              <svg class="button-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
               </svg>
-              <span id="syncStatusText" class="sync-status-text">Last synced just now</span>
-            </div>
-            
-            <div class="sync-controls">
-              <label class="sync-toggle-compact">
-                <input type="checkbox" id="autoSyncToggle" checked>
-                <span class="toggle-slider-small"></span>
-                <span class="toggle-label-small">Auto-sync</span>
-              </label>
-              
-              <select id="syncInterval" class="interval-select-compact">
-                <option value="60">Every hour</option>
-                <option value="120">Every 2 hours</option>
-                <option value="240">Every 4 hours</option>
-                <option value="360">Every 6 hours</option>
-                <option value="720">Every 12 hours</option>
-                <option value="1440">Every 24 hours</option>
-              </select>
-            </div>
-            
-            <div class="sync-status-compact" id="syncStatus">
-              <span class="sync-status-indicator" id="syncStatusIndicator" style="display: none;"></span>
-              <span class="sync-status-message" id="syncStatusMessage"></span>
-            </div>
+            </button>
+            <button class="button button-secondary full-width" id="refreshData" disabled>
+              <svg class="button-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              <span>Refresh Data</span>
+            </button>
           </div>
         </div>
 
         <!-- Empty State -->
         <div class="empty-state-card" id="emptyState">
           <div class="empty-state-illustration">
-            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path>
-              <path d="M12 6v6l4 2"></path>
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+              <line x1="9" y1="9" x2="9.01" y2="9"></line>
+              <line x1="15" y1="9" x2="15.01" y2="9"></line>
             </svg>
           </div>
-          <h3 class="empty-state-title">No Workspace Connected</h3>
-          <p class="empty-state-description">Visit your Slack workspace's emoji page to capture emoji data</p>
+          <h3 class="empty-state-title">Connect Your Workspace</h3>
+          <p class="empty-state-description">Visit your Slack workspace's emoji customization page to start syncing your emojis</p>
           <a href="https://slack.com/customize/emoji" target="_blank" class="empty-state-link">
-            Open Slack Emoji Page
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
               <polyline points="15 3 21 3 21 9"></polyline>
               <line x1="10" y1="14" x2="21" y2="3"></line>
             </svg>
+            Go to Slack Emojis
           </a>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="sync-actions-vertical">
-          <button class="button button-primary full-width" id="openEmojiStudio">
-            <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"></path>
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-            <span>Open Emoji Studio</span>
-          </button>
-          
-          <button class="button button-secondary full-width" id="refreshData" disabled>
-            <svg class="button-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10"></polyline>
-              <polyline points="1 20 1 14 7 14"></polyline>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-            </svg>
-            <span>Refresh Data</span>
-          </button>
         </div>
       </div>
     </div>
@@ -148,7 +139,7 @@
           <div class="create-header">
             <h3>Create Emojis</h3>
             <div class="header-actions">
-              <label for="fileInput" class="button button-text" style="cursor: pointer;">
+              <label for="fileInput" class="button button-text" style="cursor: pointer;" title="Upload images or videos">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="17 8 12 3 7 8"></polyline>
@@ -157,7 +148,7 @@
                 Upload
               </label>
               <input type="file" id="fileInput" accept="image/*,video/*" multiple style="display: none;">
-              <button class="button button-text" id="clearAllButton" style="display: none;">
+              <button class="button button-text" id="clearAllButton" style="display: none;" title="Remove all emojis">
                 Clear All
               </button>
             </div>
@@ -207,10 +198,10 @@
       <div class="mobile-section">
         <!-- Mobile Connection Header -->
         <div class="mobile-header">
-          <h3>Connect to Mobile</h3>
-          <p class="mobile-subtitle">Scan this code with the mobile app to sync your workspace.</p>
-          <a href="https://testflight.apple.com/join/YXrNwNRH" target="_blank" class="testflight-link">
-            📱 Join iOS Beta on TestFlight
+          <h3>Connect to Mobile App</h3>
+          <p class="mobile-subtitle">Scan this QR code with the Emoji Studio mobile app to access your workspace on the go.</p>
+          <a href="https://apps.apple.com/us/app/emoji-studio-for-slack/id6751079971" target="_blank" class="testflight-link" title="Download from the App Store">
+            📱 Download on the App Store
           </a>
         </div>
 
