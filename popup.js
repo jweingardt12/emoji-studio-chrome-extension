@@ -123,6 +123,44 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initializeSyncTab();
   initializeCreateTab();
   initializeMobileTab();
+
+  // QR Code Modal functionality
+  const qrButton = document.getElementById('qrButton');
+  const qrModal = document.getElementById('qrModal');
+  const qrModalClose = document.getElementById('qrModalClose');
+  const qrModalBackdrop = document.getElementById('qrModalBackdrop');
+
+  if (qrButton && qrModal) {
+    qrButton.addEventListener('click', () => {
+      qrModal.style.display = 'flex';
+      // Generate QR code if workspace is connected
+      // Small delay to ensure modal is visible before generating
+      setTimeout(() => {
+        if (window.updateMobileQrCode) {
+          window.updateMobileQrCode();
+        }
+      }, 50);
+    });
+
+    if (qrModalClose) {
+      qrModalClose.addEventListener('click', () => {
+        qrModal.style.display = 'none';
+      });
+    }
+
+    if (qrModalBackdrop) {
+      qrModalBackdrop.addEventListener('click', () => {
+        qrModal.style.display = 'none';
+      });
+    }
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && qrModal.style.display === 'flex') {
+        qrModal.style.display = 'none';
+      }
+    });
+  }
   
   // Check if we need to auto-sync (> 24 hours since last sync)
   chrome.storage.local.get(['lastSyncTime', 'slackData'], async (result) => {
