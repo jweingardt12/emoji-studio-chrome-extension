@@ -31,20 +31,12 @@ async function broadcastToEmojiStudioTabs(message) {
 }
 
 // Environment configuration
-const EMOJI_STUDIO_URLS = {
-  development: 'https://localhost:3001',
-  production: 'https://app.emojistudio.xyz'
-};
-
-// Force production mode - set this to true to always use production URLs
-const FORCE_PRODUCTION = true; // Set to true for production release
-
-// Set environment based on FORCE_PRODUCTION flag
-let currentEnvironment = FORCE_PRODUCTION ? 'production' : 'development';
+// Note: For development testing with local server, temporarily change
+// EMOJI_STUDIO_URL to 'https://localhost:3001' and rebuild the extension
+const EMOJI_STUDIO_URL = 'https://app.emojistudio.xyz';
 
 function getEmojiStudioUrl(path = '') {
-  const baseUrl = EMOJI_STUDIO_URLS[currentEnvironment];
-  return path ? `${baseUrl}${path}` : baseUrl;
+  return path ? `${EMOJI_STUDIO_URL}${path}` : EMOJI_STUDIO_URL;
 }
 
 // Service workers in Manifest V3 should be allowed to go idle
@@ -858,12 +850,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     lastNotificationTime = {}; // Reset notification tracking
     
     // Notify all Emoji Studio tabs to clear their data
-    // Query for both development and production URLs
-    const devUrl = EMOJI_STUDIO_URLS.development;
-    const prodUrl = EMOJI_STUDIO_URLS.production;
-    
-    
-    chrome.tabs.query({ url: [devUrl + '/*', prodUrl + '/*'] }, (tabs) => {
+    chrome.tabs.query({ url: [EMOJI_STUDIO_URL + '/*', 'https://localhost:3001/*'] }, (tabs) => {
       tabs.forEach(tab => {
         chrome.tabs.sendMessage(tab.id, {
           type: 'CLEAR_EMOJI_STUDIO_DATA'
@@ -1610,7 +1597,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Now perform the upload using the same approach as Emoji Studio
       try {
         // Create a proxy request that mimics what Emoji Studio does
-        const proxyResponse = await fetch(`${EMOJI_STUDIO_URLS[currentEnvironment]}/api/slack-emoji-upload`, {
+        const proxyResponse = await fetch(`${EMOJI_STUDIO_URL}/api/slack-emoji-upload`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

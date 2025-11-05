@@ -1,20 +1,12 @@
 // Combined popup functionality with simplified Create tab
 
 // Environment configuration
-const EMOJI_STUDIO_URLS = {
-  development: 'https://localhost:3001',
-  production: 'https://app.emojistudio.xyz'
-};
-
-// Force production mode - set this to true to always use production URLs
-const FORCE_PRODUCTION = true; // Set to true for production release
-
-// Set environment based on FORCE_PRODUCTION flag
-let currentEnvironment = FORCE_PRODUCTION ? 'production' : 'development';
+// Note: For development testing with local server, temporarily change
+// EMOJI_STUDIO_URL to 'https://localhost:3001' and rebuild the extension
+const EMOJI_STUDIO_URL = 'https://app.emojistudio.xyz';
 
 function getEmojiStudioUrl(path = '') {
-  const baseUrl = EMOJI_STUDIO_URLS[currentEnvironment];
-  return path ? `${baseUrl}${path}` : baseUrl;
+  return path ? `${EMOJI_STUDIO_URL}${path}` : EMOJI_STUDIO_URL;
 }
 
 let capturedData = {};
