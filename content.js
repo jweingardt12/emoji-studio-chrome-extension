@@ -2,7 +2,17 @@ const pendingRequests = new Map();
 let debugMode = false;
 let lastCapturedWorkspace = null;
 let lastCaptureTime = 0;
-let hasShownNotification = false; // Track if we've shown a notification on this page
+let hasCheckedEmojiPage = false; // Track if we've already checked the emoji page on this URL
+
+// Rainbow sync button state
+let rainbowButtonInjected = false;
+let rainbowButtonElement = null;
+let rainbowButtonObserver = null;
+
+// Helper function to check if on emoji customization page (DRY)
+function isOnEmojiPage() {
+  return window.location.pathname.includes('/customize/emoji');
+}
 
 const shouldUseSafariFallbackCapture = (() => {
   if (typeof safari !== 'undefined' && safari.pushNotification) {
@@ -84,10 +94,10 @@ setTimeout(checkIfLoggedIn, 1000);
 
 // Check if we're on the emoji customization page and show a prompt
 function checkEmojiPage() {
-  const isEmojiPage = window.location.pathname.includes('/customize/emoji');
-  console.log('[Emoji Studio Extension] Page check - Is emoji page?', isEmojiPage, 'Path:', window.location.pathname);
-  
-  if (isEmojiPage && !hasShownNotification) {
+  const onEmojiPage = isOnEmojiPage();
+  console.log('[Emoji Studio Extension] Page check - Is emoji page?', onEmojiPage, 'Path:', window.location.pathname);
+
+  if (onEmojiPage && !hasCheckedEmojiPage) {
     console.log('[Emoji Studio Extension] On emoji customization page, checking for data...');
     
     // Get the workspace from the URL
@@ -110,107 +120,353 @@ function checkEmojiPage() {
       console.log('[Emoji Studio Extension] Data check response:', response);
       
       if (response.hasEmojis && response.emojiCount > 0) {
-        // We have emoji data - show green sync notification
+        // We have emoji data - rainbow button is persistent on the page
         console.log('[Emoji Studio Extension] Found emoji data:', response.emojiCount, 'emojis');
-        if (!hasShownNotification) {
-          hasShownNotification = true;
-          showNotification(`${response.emojiCount} emojis ready`);
-        }
       } else if (response.hasData) {
         // We have auth but no emojis - might be fetching
         console.log('[Emoji Studio Extension] Have auth data but no emojis yet');
         // Wait a bit and check again
         setTimeout(() => {
-          if (!hasShownNotification) {
+          if (!hasCheckedEmojiPage) {
             checkEmojiPage();
           }
         }, 2000);
       } else {
         // No data at all - show refresh prompt
         console.log('[Emoji Studio Extension] No data captured yet');
-        if (!hasShownNotification) {
-          hasShownNotification = true;
-          showPromptNotification();
-        }
+        // Rainbow button is now persistent on the page, no need for transient notification
       }
     });
   }
 }
 
-// Show a prompt to refresh the page to capture data
-function showPromptNotification() {
-  const existingNotification = document.querySelector('.emoji-studio-notification');
-  if (existingNotification) {
-    existingNotification.remove();
-  }
-  
-  const notification = document.createElement('div');
-  notification.className = 'emoji-studio-notification';
-  notification.innerHTML = `
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <path d="M23 4v6h-6"></path>
-        <path d="M1 20v-6h6"></path>
-        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-      </svg>
-      <span style="font-size: 12px;">Fetch & sync emojis</span>
-      <button class="emoji-studio-refresh-btn" style="
-        background: rgba(255, 255, 255, 0.15);
-        color: white;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        padding: 3px 8px;
-        font-size: 10px;
-        border-radius: 2px;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        margin-left: 4px;
-        font-weight: 500;
-        letter-spacing: 0.3px;
-        text-transform: uppercase;
-      ">
-        Sync
-      </button>
-    </div>
-  `;
-  notification.style.cssText = `
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    background: #15803d;
-    color: white;
-    padding: 6px 10px;
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(21, 128, 61, 0.15);
-    z-index: 10000;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 11px;
-    line-height: 1.2;
-    animation: slideIn 0.2s ease-out;
-  `;
-  
-  document.body.appendChild(notification);
-  
-  // Add click handler for sync button
-  const refreshBtn = notification.querySelector('.emoji-studio-refresh-btn');
-  refreshBtn.addEventListener('click', () => {
-    // Change button text to show loading
-    refreshBtn.textContent = 'Loading...';
-    refreshBtn.disabled = true;
-    
-    // Trigger a page refresh to capture auth data, then sync
-    // First, set a flag that we want to auto-sync after refresh
-    sessionStorage.setItem('emojiStudioAutoSync', 'true');
-    window.location.reload();
-  });
-  
-  // Auto-hide after 10 seconds
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.style.animation = 'slideOut 0.2s ease-out forwards';
-      setTimeout(() => notification.remove(), 300);
+// ============================================================================
+// RAINBOW SYNC BUTTON - Persistent button for emoji customization page
+// ============================================================================
+
+function injectRainbowButtonStyles() {
+  if (document.getElementById('emoji-studio-rainbow-btn-styles')) return;
+
+  const styles = document.createElement('style');
+  styles.id = 'emoji-studio-rainbow-btn-styles';
+  styles.textContent = `
+    /* MagicUI Rainbow Button - Color Variables */
+    :root {
+      --es-color-1: 0 100% 63%;
+      --es-color-2: 270 100% 63%;
+      --es-color-3: 210 100% 63%;
+      --es-color-4: 195 100% 63%;
+      --es-color-5: 90 100% 55%;
     }
-  }, 10000);
+
+    /* Rainbow Button Container - MagicUI Style */
+    #emoji-studio-rainbow-btn {
+      position: relative;
+      display: inline-flex;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 12px;
+      margin-right: 8px;
+      vertical-align: middle;
+      box-sizing: border-box;
+      border: calc(0.08 * 1rem) solid transparent;
+      border-radius: 6px;
+      cursor: pointer;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1;
+      color: white;
+      background:
+        linear-gradient(#121213, #121213),
+        linear-gradient(#121213 50%, rgba(18, 18, 19, 0.6) 80%, rgba(18, 18, 19, 0)),
+        linear-gradient(90deg, hsl(var(--es-color-1)), hsl(var(--es-color-5)), hsl(var(--es-color-3)), hsl(var(--es-color-4)), hsl(var(--es-color-2)));
+      background-clip: padding-box, border-box, border-box;
+      background-origin: border-box;
+      background-size: 200%;
+      animation: emoji-studio-rainbow 2s linear infinite, emoji-studio-entry 0.5s ease-out;
+      transition: transform 0.15s ease;
+    }
+
+    /* Entry animation - scale up with slight bounce */
+    @keyframes emoji-studio-entry {
+      0% {
+        opacity: 0;
+        transform: scale(0.8);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    /* Rainbow glow effect underneath */
+    #emoji-studio-rainbow-btn::before {
+      content: '';
+      position: absolute;
+      bottom: -20%;
+      left: 50%;
+      z-index: -1;
+      height: 20%;
+      width: 60%;
+      transform: translateX(-50%);
+      background: linear-gradient(90deg, hsl(var(--es-color-1)), hsl(var(--es-color-5)), hsl(var(--es-color-3)), hsl(var(--es-color-4)), hsl(var(--es-color-2)));
+      background-size: 200%;
+      filter: blur(12px);
+      animation: emoji-studio-rainbow 2s linear infinite;
+    }
+
+    /* Shimmer effect overlay */
+    #emoji-studio-rainbow-btn::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0) 10%,
+        rgba(255, 255, 255, 0.3) 50%,
+        rgba(255, 255, 255, 0) 90%,
+        transparent 100%
+      );
+      border-radius: inherit;
+      animation: emoji-studio-shimmer 3s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    #emoji-studio-rainbow-btn:hover {
+      transform: translateY(-2px);
+    }
+
+    #emoji-studio-rainbow-btn:active {
+      transform: translateY(0);
+    }
+
+    /* Rainbow Animation */
+    @keyframes emoji-studio-rainbow {
+      0% { background-position: 0%; }
+      100% { background-position: 200%; }
+    }
+
+    /* Shimmer Animation */
+    @keyframes emoji-studio-shimmer {
+      0% { left: -100%; }
+      50% { left: 100%; }
+      100% { left: 100%; }
+    }
+
+    /* Logo Styling */
+    .emoji-studio-rainbow-btn-logo {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
+      border-radius: 2px;
+    }
+
+    /* Dark Mode Support - White button with rainbow border */
+    .p-theme--dark #emoji-studio-rainbow-btn,
+    .sk-client-theme--dark #emoji-studio-rainbow-btn {
+      color: #121213;
+      background:
+        linear-gradient(#fff, #fff),
+        linear-gradient(#fff 50%, rgba(255, 255, 255, 0.6) 80%, rgba(0, 0, 0, 0)),
+        linear-gradient(90deg, hsl(var(--es-color-1)), hsl(var(--es-color-5)), hsl(var(--es-color-3)), hsl(var(--es-color-4)), hsl(var(--es-color-2)));
+      background-clip: padding-box, border-box, border-box;
+      background-origin: border-box;
+      background-size: 200%;
+    }
+
+    /* Syncing state */
+    #emoji-studio-rainbow-btn.syncing {
+      opacity: 0.7;
+      cursor: wait;
+      animation-play-state: paused;
+    }
+
+    #emoji-studio-rainbow-btn.syncing::before {
+      animation-play-state: paused;
+    }
+
+    #emoji-studio-rainbow-btn:disabled {
+      pointer-events: none;
+      opacity: 0.5;
+    }
+  `;
+
+  document.head.appendChild(styles);
+  console.log('[Emoji Studio] Rainbow button styles injected');
 }
+
+function createRainbowSyncButton() {
+  const button = document.createElement('button');
+  button.id = 'emoji-studio-rainbow-btn';
+  button.innerHTML = `
+    <img
+      src="${chrome.runtime.getURL('logo.png')}"
+      class="emoji-studio-rainbow-btn-logo"
+      alt="Emoji Studio"
+      onerror="this.style.display='none'"
+    />
+    <span class="emoji-studio-rainbow-btn-text">Sync with Emoji Studio</span>
+  `;
+
+  button.addEventListener('click', () => {
+    console.log('[Emoji Studio] Rainbow button clicked - initiating sync');
+
+    // Update button state
+    button.classList.add('syncing');
+    const textSpan = button.querySelector('.emoji-studio-rainbow-btn-text');
+    if (textSpan) textSpan.textContent = 'Syncing...';
+
+    // Send sync message
+    chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO_AND_OPEN' });
+
+    // Reset button after delay
+    setTimeout(() => {
+      button.classList.remove('syncing');
+      if (textSpan) textSpan.textContent = 'Sync with Emoji Studio';
+    }, 3000);
+  });
+
+  return button;
+}
+
+function injectRainbowSyncButton() {
+  // Prevent duplicate injection - check DOM as source of truth
+  if (document.querySelector('#emoji-studio-rainbow-btn')) {
+    rainbowButtonInjected = true; // Sync state with DOM
+    return;
+  }
+
+  // Only inject on emoji customization page
+  if (!isOnEmojiPage()) {
+    return;
+  }
+
+  console.log('[Emoji Studio] Injecting rainbow sync button...');
+
+  // Inject styles first
+  injectRainbowButtonStyles();
+
+  // Strategy 1: Find the "Add Alias" button and insert before it
+  const addAliasButton = document.querySelector('button.c-button-unstyled[data-qa="customize_emoji_add_alias_button"]') ||
+                         Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Add Alias');
+
+  if (addAliasButton && addAliasButton.parentNode) {
+    const button = createRainbowSyncButton();
+    addAliasButton.parentNode.insertBefore(button, addAliasButton);
+    rainbowButtonInjected = true;
+    rainbowButtonElement = button;
+    console.log('[Emoji Studio] Rainbow button injected before Add Alias button');
+    setupRainbowButtonObserver();
+    return;
+  }
+
+  // Strategy 2: Find button container with "Add Custom Emoji" button
+  const addEmojiButton = document.querySelector('button[data-qa="customize_emoji_add_button"]') ||
+                         Array.from(document.querySelectorAll('button')).find(btn => btn.textContent?.includes('Add Custom Emoji'));
+
+  if (addEmojiButton && addEmojiButton.parentNode) {
+    const button = createRainbowSyncButton();
+    // Insert at the beginning of the button container
+    addEmojiButton.parentNode.insertBefore(button, addEmojiButton.parentNode.firstChild);
+    rainbowButtonInjected = true;
+    rainbowButtonElement = button;
+    console.log('[Emoji Studio] Rainbow button injected in button container');
+    setupRainbowButtonObserver();
+    return;
+  }
+
+  // Strategy 3: Fallback - find header and insert after it
+  const primarySelectors = [
+    '.p-customize_emoji_wrapper__header',
+    '[data-qa="customize_emoji_header"]',
+    '.p-ia__view_header',
+    'h1'
+  ];
+
+  let injectionPoint = null;
+  for (const selector of primarySelectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      injectionPoint = element;
+      console.log('[Emoji Studio] Found fallback injection point:', selector);
+      break;
+    }
+  }
+
+  if (!injectionPoint) {
+    console.log('[Emoji Studio] Could not find injection point, will retry...');
+    return;
+  }
+
+  // Create and inject button
+  const button = createRainbowSyncButton();
+
+  // Insert after the header element
+  if (injectionPoint.tagName === 'H1') {
+    injectionPoint.parentNode.insertBefore(button, injectionPoint.nextSibling);
+  } else {
+    injectionPoint.appendChild(button);
+  }
+
+  // Update state
+  rainbowButtonInjected = true;
+  rainbowButtonElement = button;
+
+  console.log('[Emoji Studio] Rainbow button injected successfully');
+
+  // Setup persistence observer
+  setupRainbowButtonObserver();
+}
+
+function setupRainbowButtonObserver() {
+  // Clean up existing observer
+  if (rainbowButtonObserver) {
+    rainbowButtonObserver.disconnect();
+  }
+
+  rainbowButtonObserver = new MutationObserver(() => {
+    const buttonExists = document.querySelector('#emoji-studio-rainbow-btn');
+
+    // Re-inject if button was removed and we're still on emoji page
+    if (isOnEmojiPage() && !buttonExists) {
+      console.log('[Emoji Studio] Button removed by DOM change, re-injecting...');
+      // Use setTimeout to debounce during rapid DOM changes
+      setTimeout(() => injectRainbowSyncButton(), 100);
+    }
+  });
+
+  rainbowButtonObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+function removeRainbowSyncButton() {
+  if (rainbowButtonElement && rainbowButtonElement.parentNode) {
+    rainbowButtonElement.remove();
+  }
+
+  if (rainbowButtonObserver) {
+    rainbowButtonObserver.disconnect();
+    rainbowButtonObserver = null;
+  }
+
+  rainbowButtonInjected = false;
+  rainbowButtonElement = null;
+}
+
+// ============================================================================
 
 // Check if we should auto-sync after refresh
 function checkAutoSync() {
@@ -282,13 +538,26 @@ function checkAutoSync() {
 checkAutoSync();
 checkEmojiPage();
 
+// Inject rainbow button on initial load if on emoji page (single entry point)
+setTimeout(() => {
+  if (isOnEmojiPage()) {
+    injectRainbowSyncButton();
+  }
+}, 1000);
+
 // Also check when the URL changes (for SPAs)
 let lastUrl = window.location.href;
 setInterval(() => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
-    hasShownNotification = false; // Reset for new page
+    hasCheckedEmojiPage = false; // Reset for new page
     checkEmojiPage();
+
+    // Handle rainbow button based on page - cleanup first, then inject if needed
+    removeRainbowSyncButton(); // Always cleanup old observer/state first
+    if (isOnEmojiPage()) {
+      setTimeout(() => injectRainbowSyncButton(), 500);
+    }
   }
 }, 1000);
 
@@ -785,21 +1054,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Verify data was saved by checking storage
           chrome.storage.local.get('slackData', (result) => {
             if (result.slackData) {
+              console.log('[Emoji Studio Extension] Data saved successfully');
             }
           });
-          
-          // Only show notification on the emoji customization page
-          const isEmojiPage = window.location.pathname.includes('/customize/emoji');
-          
-          if (response && response.showNotification && !hasShownNotification && isEmojiPage) {
-            hasShownNotification = true;
-            // Add a small delay to batch multiple captures
-            setTimeout(() => {
-              showNotification('Emoji data captured');
-            }, 500);
-          } else {
-          }
+          // Rainbow button is now persistent on the page, no need for transient notification
         }).catch(err => {
+          console.error('[Emoji Studio Extension] Error sending data:', err);
         });
       } else if (data.workspace && !data.token) {
         chrome.runtime.sendMessage({
@@ -815,91 +1075,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   return true; // Keep message channel open
 });
-
-function showNotification(message) {
-  // Check if notification already exists
-  const existingNotification = document.querySelector('.emoji-studio-notification');
-  if (existingNotification) {
-    existingNotification.remove();
-  }
-  
-  const notification = document.createElement('div');
-  notification.className = 'emoji-studio-notification';
-  notification.innerHTML = `
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <polyline points="20 6 9 17 4 12"></polyline>
-      </svg>
-      <span style="font-size: 12px;">Emoji data captured</span>
-      <button class="emoji-studio-sync-btn" style="
-        background: rgba(255, 255, 255, 0.15);
-        color: white;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        padding: 3px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: 450;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
-        margin-left: 2px;
-      ">
-        Sync
-      </button>
-    </div>
-  `;
-  notification.style.cssText = `
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    background: #15803d;
-    color: white;
-    padding: 6px 10px;
-    border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(21, 128, 61, 0.15);
-    z-index: 10000;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 12px;
-    font-weight: 450;
-    animation: slideIn 0.15s ease-out;
-  `;
-  
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideIn {
-      from { transform: translateX(15px); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-      from { transform: translateX(0); opacity: 1; }
-      to { transform: translateX(15px); opacity: 0; }
-    }
-    .emoji-studio-sync-btn:hover {
-      background: rgba(255, 255, 255, 0.25) !important;
-      border-color: rgba(255, 255, 255, 0.35) !important;
-    }
-  `;
-  document.head.appendChild(style);
-  
-  document.body.appendChild(notification);
-  
-  // Add click handler for sync button
-  const syncBtn = notification.querySelector('.emoji-studio-sync-btn');
-  syncBtn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO_AND_OPEN' });
-    // Remove notification immediately when clicked
-    notification.style.animation = 'slideOut 0.15s ease-out forwards';
-    setTimeout(() => notification.remove(), 200);
-  });
-  
-  // Auto-hide after 5 seconds (increased from 2 seconds to give time to click)
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.style.animation = 'slideOut 0.2s ease-out forwards';
-      setTimeout(() => notification.remove(), 300);
-    }
-  }, 5000);
-}
 
 // Clean up old pending requests
 setInterval(() => {
