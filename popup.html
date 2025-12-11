@@ -44,6 +44,13 @@
         </svg>
         Create
       </button>
+      <button class="tab-button" data-tab="settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        Settings
+      </button>
     </div>
 
     <!-- Sync Tab Content -->
@@ -190,6 +197,32 @@
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
           <span id="createErrorText"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Tab Content -->
+    <div class="tab-content" id="settingsTab">
+      <div class="settings-section">
+        <h3 class="settings-section-title">Slack Web App</h3>
+        <p class="settings-section-subtitle">Configure how the extension behaves in the Slack web app</p>
+
+        <div class="settings-group">
+          <label class="sync-toggle">
+            <input type="checkbox" id="emojiTooltipToggle" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Emoji details on hover</span>
+          </label>
+          <p class="settings-description">Show creator name and date when hovering over emoji reactions</p>
+        </div>
+
+        <div class="settings-group">
+          <label class="sync-toggle">
+            <input type="checkbox" id="bulkReactToggle" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Bulk emoji reactions</span>
+          </label>
+          <p class="settings-description">Add ⚡ button to quickly react with multiple emojis</p>
         </div>
       </div>
     </div>

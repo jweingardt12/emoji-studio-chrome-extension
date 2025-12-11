@@ -115,6 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initializeSyncTab();
   initializeCreateTab();
   initializeMobileTab();
+  initializeSettingsTab();
 
   // QR Code Modal functionality
   const qrButton = document.getElementById('qrButton');
@@ -1752,7 +1753,7 @@ function parseSlackCurl(curlCommand) {
   }
   
   const isValid = !!(token && cookie && workspace);
-  
+
   return {
     token,
     cookie,
@@ -1760,4 +1761,50 @@ function parseSlackCurl(curlCommand) {
     isValid,
     error: isValid ? null : 'Missing required data'
   };
+}
+
+// Settings Tab functionality
+async function initializeSettingsTab() {
+  const emojiTooltipToggle = document.getElementById('emojiTooltipToggle');
+  const bulkReactToggle = document.getElementById('bulkReactToggle');
+
+  if (!emojiTooltipToggle || !bulkReactToggle) {
+    console.log('[Settings] Settings tab elements not found');
+    return;
+  }
+
+  // Load current settings
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'GET_SLACK_APP_SETTINGS' });
+    const settings = response.settings || { emojiTooltipEnabled: true, bulkReactEnabled: true };
+
+    emojiTooltipToggle.checked = settings.emojiTooltipEnabled;
+    bulkReactToggle.checked = settings.bulkReactEnabled;
+  } catch (error) {
+    console.error('[Settings] Failed to load settings:', error);
+  }
+
+  // Handle tooltip toggle change
+  emojiTooltipToggle.addEventListener('change', async () => {
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_SLACK_APP_SETTINGS',
+        settings: { emojiTooltipEnabled: emojiTooltipToggle.checked }
+      });
+    } catch (error) {
+      console.error('[Settings] Failed to update tooltip setting:', error);
+    }
+  });
+
+  // Handle bulk react toggle change
+  bulkReactToggle.addEventListener('change', async () => {
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_SLACK_APP_SETTINGS',
+        settings: { bulkReactEnabled: bulkReactToggle.checked }
+      });
+    } catch (error) {
+      console.error('[Settings] Failed to update bulk react setting:', error);
+    }
+  });
 }

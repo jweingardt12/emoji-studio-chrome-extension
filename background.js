@@ -316,6 +316,18 @@ chrome.runtime.onInstalled.addListener(() => {
       });
     }
   });
+
+  // Initialize Slack app settings if not present
+  chrome.storage.local.get('slackAppSettings', (result) => {
+    if (!result.slackAppSettings) {
+      chrome.storage.local.set({
+        slackAppSettings: {
+          emojiTooltipEnabled: true,
+          bulkReactEnabled: true
+        }
+      });
+    }
+  });
   
   // Context menu will be created by the startup code below
   
@@ -578,12 +590,18 @@ async function syncToEmojiStudio(isAutoSync = false) {
     
     console.log('Data synced to Chrome storage successfully');
     chrome.storage.local.set({ lastSyncTime: now });
-    
+
     // Update sync state to success
     await updateSyncState('success', now, now);
-    
+
     // Calculate non-alias emoji count for consistent display
     const nonAliasCount = (dataToSend.emoji || []).filter(emoji => !emoji.is_alias).length;
+
+    // Record successful sync to history
+    await recordSyncHistory(workspace, true, null, nonAliasCount, isAutoSync);
+
+    // Check storage usage after sync
+    await checkStorageUsage();
     
     // Broadcast sync completion to all tabs
     console.log('[syncToEmojiStudio] Broadcasting sync completion with total:', dataToSend.emojiCount || 0, 'non-alias:', nonAliasCount);
@@ -631,18 +649,21 @@ async function syncToEmojiStudio(isAutoSync = false) {
   } catch (error) {
     console.error('Failed to sync to Chrome storage:', error);
     await updateSyncState('error', now);
-    
+
+    // Record failed sync to history
+    await recordSyncHistory(workspace || 'unknown', false, error.message, 0, isAutoSync);
+
     // Broadcast sync error to all tabs
-    broadcastToEmojiStudioTabs({ 
-      type: 'SYNC_ERROR', 
+    broadcastToEmojiStudioTabs({
+      type: 'SYNC_ERROR',
       workspace: workspace || 'unknown',
       error: error.message,
-      timestamp: now 
+      timestamp: now
     });
 
     return { success: false, error: error.message };
   }
-  
+
   // No longer need API or tab-based sync - Chrome storage is always available
 }
 
@@ -653,22 +674,78 @@ async function updateSyncState(state, lastAttempt = null, lastSuccess = null) {
     ...syncSettings,
     syncState: state
   };
-  
+
   if (lastAttempt !== null) {
     updatedSettings.lastSyncAttempt = lastAttempt;
   }
-  
+
   if (lastSuccess !== null) {
     updatedSettings.lastSuccessfulSync = lastSuccess;
   }
-  
+
   await chrome.storage.local.set({ syncSettings: updatedSettings });
-  
+
   // Notify popup if it's open
-  chrome.runtime.sendMessage({ 
-    type: 'SYNC_STATE_UPDATED', 
-    syncSettings: updatedSettings 
+  chrome.runtime.sendMessage({
+    type: 'SYNC_STATE_UPDATED',
+    syncSettings: updatedSettings
   }).catch(() => {});
+}
+
+// Record sync attempt to history for debugging
+async function recordSyncHistory(workspace, success, error = null, emojiCount = 0, isAutoSync = false) {
+  try {
+    const { syncHistory = [] } = await chrome.storage.local.get('syncHistory');
+
+    // Add new entry at the beginning
+    syncHistory.unshift({
+      timestamp: Date.now(),
+      workspace: workspace,
+      success: success,
+      error: error,
+      emojiCount: emojiCount,
+      isAutoSync: isAutoSync
+    });
+
+    // Keep only last 50 entries to manage storage
+    if (syncHistory.length > 50) {
+      syncHistory.splice(50);
+    }
+
+    await chrome.storage.local.set({ syncHistory });
+    console.log('[SyncHistory] Recorded sync attempt:', { workspace, success, emojiCount, isAutoSync });
+  } catch (err) {
+    console.error('[SyncHistory] Failed to record sync:', err);
+  }
+}
+
+// Check storage usage and warn if approaching limit
+async function checkStorageUsage() {
+  try {
+    const bytesInUse = await chrome.storage.local.getBytesInUse(null);
+    const quotaBytes = chrome.storage.local.QUOTA_BYTES || 5242880; // 5MB default
+    const usagePercent = (bytesInUse / quotaBytes) * 100;
+
+    console.log(`[Storage] Usage: ${(bytesInUse / 1024 / 1024).toFixed(2)}MB / ${(quotaBytes / 1024 / 1024).toFixed(2)}MB (${usagePercent.toFixed(1)}%)`);
+
+    if (usagePercent > 80) {
+      console.warn(`[Storage] Warning: Storage usage is at ${usagePercent.toFixed(1)}%`);
+      // Could trigger cleanup of old sync history if needed
+      if (usagePercent > 90) {
+        // Emergency cleanup - remove old sync history entries
+        const { syncHistory = [] } = await chrome.storage.local.get('syncHistory');
+        if (syncHistory.length > 10) {
+          await chrome.storage.local.set({ syncHistory: syncHistory.slice(0, 10) });
+          console.log('[Storage] Cleaned up sync history to free space');
+        }
+      }
+    }
+
+    return { bytesInUse, quotaBytes, usagePercent };
+  } catch (err) {
+    console.error('[Storage] Failed to check usage:', err);
+    return null;
+  }
 }
 
 // Function to perform auto-sync
@@ -946,7 +1023,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   } else if (request.type === 'GET_SYNC_SETTINGS') {
     chrome.storage.local.get('syncSettings', (result) => {
-      sendResponse({ 
+      sendResponse({
         syncSettings: result.syncSettings || {
           autoSyncEnabled: true,
           syncIntervalMinutes: 60,
@@ -954,6 +1031,76 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           lastSuccessfulSync: null,
           syncState: 'idle'
         }
+      });
+    });
+    return true;
+  } else if (request.type === 'GET_SYNC_HISTORY') {
+    // Return sync history for debugging
+    chrome.storage.local.get('syncHistory', (result) => {
+      sendResponse({
+        syncHistory: result.syncHistory || []
+      });
+    });
+    return true;
+  } else if (request.type === 'GET_STORAGE_USAGE') {
+    // Return storage usage info
+    checkStorageUsage().then(usage => {
+      sendResponse({ usage });
+    });
+    return true;
+  } else if (request.type === 'CLEAR_SYNC_HISTORY') {
+    // Clear sync history
+    chrome.storage.local.remove('syncHistory', () => {
+      sendResponse({ success: true });
+    });
+    return true;
+  } else if (request.type === 'GET_SLACK_APP_SETTINGS') {
+    chrome.storage.local.get('slackAppSettings', (result) => {
+      sendResponse({
+        settings: result.slackAppSettings || {
+          emojiTooltipEnabled: true,
+          bulkReactEnabled: true
+        }
+      });
+    });
+    return true;
+  } else if (request.type === 'UPDATE_SLACK_APP_SETTINGS') {
+    chrome.storage.local.get('slackAppSettings', (result) => {
+      const currentSettings = result.slackAppSettings || {
+        emojiTooltipEnabled: true,
+        bulkReactEnabled: true
+      };
+      const newSettings = { ...currentSettings, ...request.settings };
+      chrome.storage.local.set({ slackAppSettings: newSettings }, () => {
+        sendResponse({ success: true, settings: newSettings });
+      });
+    });
+    return true;
+  } else if (request.type === 'GET_BULK_REACTION_SETS') {
+    chrome.storage.local.get('bulkReactionSets', (result) => {
+      sendResponse({ sets: result.bulkReactionSets || [] });
+    });
+    return true;
+  } else if (request.type === 'SAVE_BULK_REACTION_SET') {
+    chrome.storage.local.get('bulkReactionSets', (result) => {
+      const sets = result.bulkReactionSets || [];
+      const newSet = {
+        id: `set_${Date.now()}`,
+        name: request.name,
+        emojis: request.emojis,
+        createdAt: Date.now()
+      };
+      sets.push(newSet);
+      chrome.storage.local.set({ bulkReactionSets: sets }, () => {
+        sendResponse({ success: true, set: newSet });
+      });
+    });
+    return true;
+  } else if (request.type === 'DELETE_BULK_REACTION_SET') {
+    chrome.storage.local.get('bulkReactionSets', (result) => {
+      const sets = (result.bulkReactionSets || []).filter(s => s.id !== request.id);
+      chrome.storage.local.set({ bulkReactionSets: sets }, () => {
+        sendResponse({ success: true });
       });
     });
     return true;

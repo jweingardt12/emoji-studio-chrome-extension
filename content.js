@@ -916,6 +916,59 @@ setInterval(() => {
 // Shows emoji details when hovering over reactions in Slack
 // ============================================================================
 
+// Global settings for Slack app features
+let slackAppSettings = { emojiTooltipEnabled: true, bulkReactEnabled: true };
+
+// Global reference to bulk reaction manager for settings updates
+let bulkReactionManagerInstance = null;
+
+// Load settings from storage
+async function loadSlackAppSettings() {
+  try {
+    const result = await chrome.storage.local.get('slackAppSettings');
+    const stored = result.slackAppSettings || {};
+    // Merge with defaults to ensure all properties exist
+    slackAppSettings = {
+      emojiTooltipEnabled: stored.emojiTooltipEnabled !== false, // default true
+      bulkReactEnabled: stored.bulkReactEnabled !== false // default true
+    };
+    console.log('[Emoji Studio] Loaded Slack app settings:', slackAppSettings);
+  } catch (e) {
+    console.log('[Emoji Studio] Using default settings');
+  }
+}
+
+// Listen for settings changes
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.slackAppSettings) {
+    const oldSettings = { ...slackAppSettings };
+    const newValue = changes.slackAppSettings.newValue || {};
+    // Merge with defaults to ensure all properties exist
+    slackAppSettings = {
+      emojiTooltipEnabled: newValue.emojiTooltipEnabled !== false,
+      bulkReactEnabled: newValue.bulkReactEnabled !== false
+    };
+    console.log('[Emoji Studio] Settings updated:', slackAppSettings);
+
+    // If bulk react was disabled, remove all existing bulk buttons
+    if (oldSettings.bulkReactEnabled && !slackAppSettings.bulkReactEnabled) {
+      document.querySelectorAll('.emoji-studio-bulk-btn, .emoji-studio-bulk-btn-inline').forEach(btn => btn.remove());
+      // Clear processed sets so buttons can be re-injected when re-enabled
+      if (bulkReactionManagerInstance?.inlineButtonInjector) {
+        bulkReactionManagerInstance.inlineButtonInjector.clearProcessedSets();
+      }
+      console.log('[Emoji Studio] Removed bulk reaction buttons');
+    }
+
+    // If tooltip was disabled, hide any visible popover
+    if (oldSettings.emojiTooltipEnabled && !slackAppSettings.emojiTooltipEnabled) {
+      const popover = document.getElementById('emoji-studio-reaction-popover');
+      if (popover) popover.remove();
+      console.log('[Emoji Studio] Removed emoji tooltip');
+    }
+  }
+});
+
 // Emoji Lookup Service - retrieves emoji data from chrome.storage
 class EmojiLookupService {
   constructor() {
@@ -1008,11 +1061,11 @@ class ReactionHoverPopover {
       #emoji-studio-reaction-popover {
         position: fixed;
         background: #1a1d21;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 8px;
         padding: 12px;
         z-index: 999999;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
         font-size: 12px;
         min-width: 180px;
         cursor: pointer;
@@ -1086,6 +1139,9 @@ class ReactionHoverPopover {
   }
 
   handleReactionEnter(reaction, event) {
+    // Check if emoji tooltip is enabled (only skip if explicitly disabled)
+    if (slackAppSettings.emojiTooltipEnabled === false) return;
+
     this.isOverReaction = true;
 
     // Clear any pending hide
@@ -2038,6 +2094,75 @@ class BulkReactionManager {
         font-size: 13px;
       }
 
+      .emoji-studio-saved-sets-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        min-height: 28px;
+      }
+
+      .emoji-studio-saved-sets-label {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.5);
+        flex-shrink: 0;
+      }
+
+      .emoji-studio-saved-sets-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        flex: 1;
+        overflow-x: auto;
+      }
+
+      .emoji-studio-saved-set-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.8);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.15s;
+      }
+
+      .emoji-studio-saved-set-chip:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      .emoji-studio-saved-set-chip .set-count {
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .emoji-studio-saved-set-chip .delete-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.2);
+        font-size: 10px;
+        line-height: 1;
+        transition: background 0.15s;
+      }
+
+      .emoji-studio-saved-set-chip .delete-btn:hover {
+        background: #e53935;
+        color: white;
+      }
+
+      .emoji-studio-saved-sets-empty {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.3);
+        font-style: italic;
+      }
+
       .emoji-studio-bulk-bar-actions {
         display: flex;
         gap: 8px;
@@ -2289,11 +2414,16 @@ class BulkReactionManager {
     const bar = document.createElement('div');
     bar.className = 'emoji-studio-bulk-bar';
     bar.innerHTML = `
+      <div class="emoji-studio-saved-sets-row">
+        <span class="emoji-studio-saved-sets-label">Saved:</span>
+        <div class="emoji-studio-saved-sets-chips"></div>
+      </div>
       <div class="emoji-studio-bulk-bar-emojis">
         <span class="emoji-studio-bulk-bar-placeholder">Click emojis to select</span>
       </div>
       <div class="emoji-studio-bulk-bar-actions">
         <button class="emoji-studio-bulk-bar-btn secondary" data-action="select-all">Select All</button>
+        <button class="emoji-studio-bulk-bar-btn secondary" data-action="save-set">Save</button>
         <button class="emoji-studio-bulk-bar-btn secondary" data-action="clear">Clear</button>
         <button class="emoji-studio-bulk-bar-btn primary" data-action="add" disabled>Add Reactions</button>
       </div>
@@ -2302,6 +2432,10 @@ class BulkReactionManager {
     // Attach event handlers
     bar.querySelector('[data-action="select-all"]').addEventListener('click', () => {
       this.selectAllVisible();
+    });
+
+    bar.querySelector('[data-action="save-set"]').addEventListener('click', () => {
+      this.promptSaveSet();
     });
 
     bar.querySelector('[data-action="clear"]').addEventListener('click', () => {
@@ -2314,6 +2448,9 @@ class BulkReactionManager {
 
     // Append to picker first (so elements are in DOM)
     pickerContainer.appendChild(bar);
+
+    // Load and render saved sets
+    this.loadSavedSets();
 
     // Watch for search input changes to show/hide Select All button
     this.watchSearchInput(pickerContainer);
@@ -2452,8 +2589,138 @@ class BulkReactionManager {
     this.updateBulkBar();
   }
 
+  // ========== Saved Sets Methods ==========
+
+  async loadSavedSets() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_BULK_REACTION_SETS' });
+      this.renderSavedSets(response.sets || []);
+    } catch (e) {
+      console.error('[Emoji Studio] Failed to load saved sets:', e);
+    }
+  }
+
+  renderSavedSets(sets) {
+    const row = document.querySelector('.emoji-studio-saved-sets-row');
+    const container = document.querySelector('.emoji-studio-saved-sets-chips');
+    if (!row || !container) return;
+
+    if (sets.length === 0) {
+      row.style.display = 'none';
+      return;
+    }
+
+    row.style.display = 'flex';
+    container.innerHTML = '';
+
+    sets.forEach(set => {
+      const chip = document.createElement('div');
+      chip.className = 'emoji-studio-saved-set-chip';
+      chip.innerHTML = `
+        <span class="set-name">${set.name}</span>
+        <span class="set-count">(${set.emojis.length})</span>
+        <span class="delete-btn" data-set-id="${set.id}">×</span>
+      `;
+
+      // Click chip name/count to load set
+      chip.querySelector('.set-name').addEventListener('click', () => {
+        this.loadSet(set);
+      });
+      chip.querySelector('.set-count').addEventListener('click', () => {
+        this.loadSet(set);
+      });
+
+      // Click X to delete
+      chip.querySelector('.delete-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteSet(set.id);
+      });
+
+      container.appendChild(chip);
+    });
+  }
+
+  async promptSaveSet() {
+    if (this.selectedEmojis.size === 0) {
+      // Show brief message on the button
+      const btn = document.querySelector('[data-action="save-set"]');
+      if (btn) {
+        const originalText = btn.textContent;
+        btn.textContent = 'Select emojis first';
+        setTimeout(() => { btn.textContent = originalText; }, 1500);
+      }
+      return;
+    }
+
+    // Simple prompt for name
+    const name = prompt('Name this emoji set:', `Set ${new Date().toLocaleDateString()}`);
+    if (!name || !name.trim()) return;
+
+    // Convert Map to array
+    const emojis = Array.from(this.selectedEmojis.entries()).map(([emojiName, url]) => ({ name: emojiName, url }));
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_BULK_REACTION_SET',
+        name: name.trim(),
+        emojis
+      });
+      this.loadSavedSets(); // Refresh the chips
+      console.log(`[Emoji Studio] Saved set "${name.trim()}" with ${emojis.length} emojis`);
+    } catch (e) {
+      console.error('[Emoji Studio] Failed to save set:', e);
+    }
+  }
+
+  loadSet(set) {
+    // Clear current selection first
+    this.clearSelections();
+
+    // Load emojis from set
+    const MAX_REACTIONS_PER_USER = 23;
+    set.emojis.forEach(emoji => {
+      if (this.selectedEmojis.size < MAX_REACTIONS_PER_USER) {
+        this.selectedEmojis.set(emoji.name, emoji.url);
+      }
+    });
+
+    // Update visual selection in picker if emojis are visible
+    this.selectedEmojis.forEach((url, name) => {
+      // Mark My Emojis tab items
+      document.querySelectorAll(`[data-emoji-name="${name}"]`).forEach(el => {
+        el.classList.add('selected');
+      });
+      // Mark native Slack emojis
+      document.querySelectorAll(`[data-name="${name}"]`).forEach(el => {
+        el.classList.add('emoji-studio-emoji-selected');
+      });
+    });
+
+    this.updateBulkBar();
+    console.log(`[Emoji Studio] Loaded set "${set.name}" with ${set.emojis.length} emojis`);
+  }
+
+  async deleteSet(setId) {
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'DELETE_BULK_REACTION_SET',
+        id: setId
+      });
+      this.loadSavedSets(); // Refresh the chips
+      console.log(`[Emoji Studio] Deleted set ${setId}`);
+    } catch (e) {
+      console.error('[Emoji Studio] Failed to delete set:', e);
+    }
+  }
+
+  // ========== End Saved Sets Methods ==========
+
   selectAllVisible() {
     const MAX_REACTIONS_PER_USER = 23;
+
+    // Get the current search term from the emoji picker search input
+    const searchInput = document.querySelector('.p-emoji_picker__input input, input[placeholder*="Search"]');
+    const searchTerm = searchInput?.value?.trim().toLowerCase() || '';
 
     // Select all visible emojis in the picker (up to limit)
     // Check My Emojis tab first
@@ -2461,6 +2728,9 @@ class BulkReactionManager {
     for (const el of myEmojis) {
       if (this.selectedEmojis.size >= MAX_REACTIONS_PER_USER) break;
       const emojiName = el.getAttribute('data-emoji-name');
+      // Only select if emoji name includes the complete search term
+      if (searchTerm && !emojiName?.toLowerCase().includes(searchTerm)) continue;
+
       const emojiImg = el.querySelector('img');
       const emojiUrl = emojiImg ? emojiImg.src : null;
       if (emojiName && !this.selectedEmojis.has(emojiName)) {
@@ -2474,6 +2744,9 @@ class BulkReactionManager {
     for (const el of nativeEmojis) {
       if (this.selectedEmojis.size >= MAX_REACTIONS_PER_USER) break;
       const emojiName = el.getAttribute('data-name');
+      // Only select if emoji name includes the complete search term
+      if (searchTerm && !emojiName?.toLowerCase().includes(searchTerm)) continue;
+
       const emojiImg = el.querySelector('img[data-emoji], img[src*="emoji"]') || el.querySelector('img');
       const emojiUrl = emojiImg ? emojiImg.src : null;
       if (emojiName && !this.selectedEmojis.has(emojiName)) {
@@ -2488,7 +2761,7 @@ class BulkReactionManager {
       this.showLimitWarning();
     }
 
-    console.log(`[Emoji Studio] Selected all visible: ${this.selectedEmojis.size} emojis`);
+    console.log(`[Emoji Studio] Selected all visible: ${this.selectedEmojis.size} emojis (search: "${searchTerm}")`);
   }
 
   watchSearchInput(pickerContainer) {
@@ -2785,6 +3058,12 @@ class InlineButtonInjector {
     this.processedReactionBars = new WeakSet();
   }
 
+  clearProcessedSets() {
+    // Create new WeakSets to allow re-injection of buttons
+    this.processedToolbars = new WeakSet();
+    this.processedReactionBars = new WeakSet();
+  }
+
   start() {
     console.log('[Emoji Studio] InlineButtonInjector started');
 
@@ -2847,6 +3126,9 @@ class InlineButtonInjector {
   }
 
   injectReactionBarButton(addReactionBtn) {
+    // Check if bulk react is enabled
+    if (!slackAppSettings.bulkReactEnabled) return;
+
     if (this.processedReactionBars.has(addReactionBtn)) return;
 
     // Find the reaction bar container
@@ -2880,6 +3162,9 @@ class InlineButtonInjector {
   }
 
   injectButton(toolbar) {
+    // Check if bulk react is enabled
+    if (!slackAppSettings.bulkReactEnabled) return;
+
     if (this.processedToolbars.has(toolbar)) return;
     if (toolbar.querySelector('.emoji-studio-bulk-btn')) return;
 
@@ -2944,6 +3229,9 @@ function initEmojiHoverFeature() {
 
   console.log('[Emoji Studio] Initializing emoji features');
 
+  // Load Slack app settings first
+  loadSlackAppSettings();
+
   const lookupService = new EmojiLookupService();
   const reactionPopover = new ReactionHoverPopover(lookupService);
   const pickerInjector = new EmojiPickerInjector(lookupService);
@@ -2958,6 +3246,9 @@ function initEmojiHoverFeature() {
   const bulkReactionManager = new BulkReactionManager(lookupService, pickerInjector);
   bulkReactionManager.init();
   pickerInjector.setBulkReactionManager(bulkReactionManager);
+
+  // Store global reference for settings updates
+  bulkReactionManagerInstance = bulkReactionManager;
 
   // Listen for storage changes to invalidate caches
   chrome.storage.onChanged.addListener((changes, area) => {
