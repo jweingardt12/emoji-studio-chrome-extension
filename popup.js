@@ -323,16 +323,22 @@ function initializeCreateTab() {
   const errorText = document.getElementById('errorText');
   const createTab = document.getElementById('createTab');
   const dragZoneHint = document.getElementById('dragZoneHint');
-  
+  const formSection = document.getElementById('formSection');
+  const emojiNameInput = document.getElementById('emojiName');
+
   async function sendToEmojiStudio(imageUrl) {
-    
+
     // Detect environment first
     await detectEnvironment();
-    
+
+    // Read the emoji name from the form input
+    const emojiName = emojiNameInput ? emojiNameInput.value.trim() : '';
+
     // Store the image data for Emoji Studio to pick up
     await chrome.storage.local.set({
       pendingEmojiStudioCreate: {
         imageUrl: imageUrl,
+        name: emojiName || undefined,
         timestamp: Date.now()
       }
     });
@@ -361,6 +367,7 @@ function initializeCreateTab() {
         previewSection.style.display = 'block';
         previewImage.src = imageUrl;
         if (previewLoading) previewLoading.style.display = 'none';
+        if (formSection) formSection.style.display = 'block';
       } else {
       }
       
@@ -412,12 +419,19 @@ function initializeCreateTab() {
       if (dragZoneHint) dragZoneHint.style.display = 'none';
       if (previewSection) previewSection.style.display = 'block';
       if (previewLoading) previewLoading.style.display = 'flex';
-      
+      if (formSection) formSection.style.display = 'block';
+
+      // Auto-populate emoji name from filename
+      if (emojiNameInput && file.name) {
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
+        emojiNameInput.value = baseName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      }
+
       // Convert to data URL and show preview
       const reader = new FileReader();
       reader.onload = async (e) => {
         const dataUrl = e.target.result;
-        
+
         // Handle different file types
         if (file.type.startsWith('video/')) {
           if (previewImage) {
@@ -509,12 +523,19 @@ function initializeCreateTab() {
       if (dragZoneHint) dragZoneHint.style.display = 'none';
       if (previewSection) previewSection.style.display = 'block';
       if (previewLoading) previewLoading.style.display = 'flex';
-      
+      if (formSection) formSection.style.display = 'block';
+
+      // Auto-populate emoji name from filename
+      if (emojiNameInput && validFile.name) {
+        const baseName = validFile.name.replace(/\.[^/.]+$/, '');
+        emojiNameInput.value = baseName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      }
+
       // Convert to data URL and show preview
       const reader = new FileReader();
       reader.onload = async (e) => {
         const dataUrl = e.target.result;
-        
+
         // For video files, show a placeholder or first frame
         if (validFile.type.startsWith('video/')) {
           if (previewImage) {
