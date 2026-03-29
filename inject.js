@@ -4,6 +4,13 @@
   if (typeof chrome === 'undefined' || !chrome.storage) {
     return;
   }
+
+  // Allowed origins for postMessage communication
+  const ALLOWED_ORIGINS = [
+    'https://app.emojistudio.xyz',
+    'https://emojistudio.xyz'
+  ];
+  const pageOrigin = window.location.origin;
   
   // Check if we're on the dashboard with extension parameter
   const urlParams = new URLSearchParams(window.location.search);
@@ -48,7 +55,7 @@
                 originalUrl: result.pendingEmojiStudioCreate.originalUrl,
                 emojiName: result.pendingEmojiStudioCreate.name,
                 workspace: result.pendingEmojiStudioCreate.workspace
-              }, '*');
+              }, pageOrigin);
               
             }, 500);
             
@@ -69,7 +76,7 @@
               window.postMessage({
                 type: 'EMOJI_STUDIO_CREATE_EMOJI',
                 data: result.pendingEmojiCreate
-              }, '*');
+              }, pageOrigin);
               
             }, 500);
             
@@ -88,7 +95,7 @@
               window.postMessage({
                 type: 'EMOJI_STUDIO_ADD_EMOJI',
                 data: result.pendingEmojiAdd
-              }, '*');
+              }, pageOrigin);
               
             }, 500);
             
@@ -104,7 +111,7 @@
     window.postMessage({
       type: 'EMOJI_STUDIO_DATA',
       data: data
-    }, '*');
+    }, pageOrigin);
     
   }
   
@@ -124,7 +131,7 @@
       window.postMessage({
         type: 'EMOJI_STUDIO_CREATE_EMOJI',
         imageUrl: request.imageUrl
-      }, '*');
+      }, pageOrigin);
       
       sendResponse({ success: true });
     } else if (request.type === 'CLEAR_EMOJI_STUDIO_DATA') {
@@ -134,7 +141,7 @@
         type: 'EMOJI_STUDIO_CLEAR_DATA_FROM_EXTENSION'
       };
       
-      window.postMessage(message, '*');
+      window.postMessage(message, pageOrigin);
       
       sendResponse({ success: true });
     }
@@ -143,6 +150,9 @@
   
   // Also listen for window messages to confirm they're being received
   window.addEventListener('message', (event) => {
+    // Only accept messages from the same page origin
+    if (!ALLOWED_ORIGINS.includes(event.origin)) return;
+
     if (event.data.type === 'EMOJI_STUDIO_DATA') {
     } else if (event.data.type === 'EMOJI_STUDIO_ADD_EMOJI') {
     } else if (event.data.type === 'EMOJI_STUDIO_CLEAR_DATA') {
@@ -174,7 +184,7 @@
             data: result.pendingEmojiAdd
           };
           
-          window.postMessage(messageData, '*');
+          window.postMessage(messageData, pageOrigin);
           
           
           // Clear the pending data
@@ -185,5 +195,5 @@
   }
   
   // Notify the extension that we're ready
-  window.postMessage({ type: 'EMOJI_STUDIO_READY' }, '*');
+  window.postMessage({ type: 'EMOJI_STUDIO_READY' }, pageOrigin);
 })();

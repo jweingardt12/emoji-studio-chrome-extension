@@ -64,6 +64,11 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('autoSync', {
     periodInMinutes: 24 * 60 // 24 hours
   });
+
+  // Set up alarm for cleaning up stale pending request data
+  chrome.alarms.create('cleanupPendingRequests', {
+    periodInMinutes: 1
+  });
   
   // Load existing data from storage
   chrome.storage.local.get('slackData', (result) => {
@@ -102,6 +107,8 @@ chrome.storage.local.get('slackData', (result) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'autoSync') {
     checkAndAutoSync();
+  } else if (alarm.name === 'cleanupPendingRequests') {
+    cleanupPendingRequestData();
   }
 });
 
@@ -647,15 +654,15 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-// Clean up old pending request data periodically
-setInterval(() => {
+// Clean up old pending request data via alarm (setInterval doesn't survive service worker termination)
+function cleanupPendingRequestData() {
   const now = Date.now();
   for (const [id, data] of pendingRequestData.entries()) {
     if (now - (data.timestamp || now) > 30000) {
       pendingRequestData.delete(id);
     }
   }
-}, 60000);
+}
 
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
