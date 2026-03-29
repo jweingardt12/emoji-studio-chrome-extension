@@ -310,6 +310,11 @@ async function initializeSyncTab() {
   
 }
 
+function sanitizeEmojiName(filename) {
+  const baseName = filename.replace(/\.[^/.]+$/, '');
+  return baseName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+}
+
 // Simplified Create Tab - just send to Emoji Studio
 function initializeCreateTab() {
   const fileInput = document.getElementById('fileInput');
@@ -331,7 +336,6 @@ function initializeCreateTab() {
     // Detect environment first
     await detectEnvironment();
 
-    // Read the emoji name from the form input
     const emojiName = emojiNameInput ? emojiNameInput.value.trim() : '';
 
     // Store the image data for Emoji Studio to pick up
@@ -422,9 +426,8 @@ function initializeCreateTab() {
       if (formSection) formSection.style.display = 'block';
 
       // Auto-populate emoji name from filename
-      if (emojiNameInput && file.name) {
-        const baseName = file.name.replace(/\.[^/.]+$/, '');
-        emojiNameInput.value = baseName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      if (emojiNameInput) {
+        emojiNameInput.value = sanitizeEmojiName(file.name);
       }
 
       // Convert to data URL and show preview
@@ -526,9 +529,8 @@ function initializeCreateTab() {
       if (formSection) formSection.style.display = 'block';
 
       // Auto-populate emoji name from filename
-      if (emojiNameInput && validFile.name) {
-        const baseName = validFile.name.replace(/\.[^/.]+$/, '');
-        emojiNameInput.value = baseName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      if (emojiNameInput) {
+        emojiNameInput.value = sanitizeEmojiName(validFile.name);
       }
 
       // Convert to data URL and show preview
