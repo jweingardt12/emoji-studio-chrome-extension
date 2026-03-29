@@ -78,21 +78,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadDataFromStorage();
   
   // Tab navigation
-  const tabButtons = document.querySelectorAll('.tab-button');
-  const tabContents = document.querySelectorAll('.tab-content');
+  const tabButtons = Array.from(document.querySelectorAll('.tab-button'));
+  const tabContents = Array.from(document.querySelectorAll('.tab-content'));
   
   // Function to switch tabs
   switchToTab = function(tabName) {
-    tabButtons.forEach(btn => btn.classList.remove('active'));
-    tabContents.forEach(content => content.classList.remove('active'));
-    
-    const targetButton = document.querySelector(`[data-tab="${tabName}"]`);
-    const targetContent = document.getElementById(`${tabName}Tab`);
-    
-    if (targetButton && targetContent) {
-      targetButton.classList.add('active');
-      targetContent.classList.add('active');
-    }
+    tabButtons.forEach(btn => {
+      const isActive = btn.getAttribute('data-tab') === tabName;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+    tabContents.forEach(content => {
+      const isActive = content.id === `${tabName}Tab`;
+      content.classList.toggle('active', isActive);
+      content.hidden = !isActive;
+    });
   };
   
   tabButtons.forEach(button => {
@@ -101,6 +102,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       switchToTab(targetTab);
     });
   });
+
+  const tabNavigation = document.querySelector('.tab-navigation');
+  if (tabNavigation) {
+    tabNavigation.addEventListener('keydown', (e) => {
+      const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
+      if (!keys.includes(e.key)) return;
+      const activeElement = document.activeElement;
+      const currentIndex = tabButtons.findIndex(btn => btn === activeElement);
+      if (currentIndex === -1) return;
+      e.preventDefault();
+      let nextIndex = currentIndex;
+      if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabButtons.length;
+      if (e.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length;
+      if (e.key === 'Home') nextIndex = 0;
+      if (e.key === 'End') nextIndex = tabButtons.length - 1;
+      const nextButton = tabButtons[nextIndex];
+      nextButton.focus();
+      switchToTab(nextButton.getAttribute('data-tab'));
+    });
+  }
   
   // Check if we should open the create tab
   const { openCreateTab, pendingEmojiCreate } = await chrome.storage.local.get(['openCreateTab', 'pendingEmojiCreate']);
@@ -109,6 +130,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     switchToTab('create');
     // Clear the flag
     chrome.storage.local.remove('openCreateTab');
+  }
+
+  // Ensure tab ARIA state is synced on load
+  if (!openCreateTab && !pendingEmojiCreate) {
+    switchToTab('sync');
   }
   
   // Initialize all tabs functionality
@@ -124,34 +150,77 @@ document.addEventListener('DOMContentLoaded', async () => {
   const qrModalBackdrop = document.getElementById('qrModalBackdrop');
 
   if (qrButton && qrModal) {
-    qrButton.addEventListener('click', () => {
+    let lastFocusedElement = null;
+    let modalKeydownHandler = null;
+
+    const getModalFocusable = () => Array.from(
+      qrModal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    ).filter(el => !el.hasAttribute('disabled'));
+
+    const openQrModal = () => {
+      lastFocusedElement = document.activeElement;
       qrModal.style.display = 'flex';
+      qrModal.setAttribute('aria-hidden', 'false');
+
       // Generate QR code if workspace is connected
-      // Small delay to ensure modal is visible before generating
       setTimeout(() => {
         if (window.updateMobileQrCode) {
           window.updateMobileQrCode();
         }
       }, 50);
-    });
+
+      const focusable = getModalFocusable();
+      if (focusable.length > 0) {
+        focusable[0].focus();
+      } else if (qrModalClose) {
+        qrModalClose.focus();
+      }
+
+      modalKeydownHandler = (e) => {
+        if (e.key === 'Tab') {
+          const elements = getModalFocusable();
+          if (elements.length === 0) return;
+          const first = elements[0];
+          const last = elements[elements.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            last.focus();
+            e.preventDefault();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            first.focus();
+            e.preventDefault();
+          }
+        }
+        if (e.key === 'Escape') {
+          closeQrModal();
+        }
+      };
+      qrModal.addEventListener('keydown', modalKeydownHandler);
+    };
+
+    const closeQrModal = () => {
+      qrModal.style.display = 'none';
+      qrModal.setAttribute('aria-hidden', 'true');
+      if (modalKeydownHandler) {
+        qrModal.removeEventListener('keydown', modalKeydownHandler);
+      }
+      if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+        lastFocusedElement.focus();
+      }
+    };
+
+    qrButton.addEventListener('click', openQrModal);
 
     if (qrModalClose) {
-      qrModalClose.addEventListener('click', () => {
-        qrModal.style.display = 'none';
-      });
+      qrModalClose.addEventListener('click', closeQrModal);
     }
 
     if (qrModalBackdrop) {
-      qrModalBackdrop.addEventListener('click', () => {
-        qrModal.style.display = 'none';
-      });
+      qrModalBackdrop.addEventListener('click', closeQrModal);
     }
 
     // Close on Escape key
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && qrModal.style.display === 'flex') {
-        qrModal.style.display = 'none';
-      }
+      if (e.key === 'Escape' && qrModal.style.display === 'flex') closeQrModal();
     });
   }
   
@@ -165,8 +234,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Show notification about auto-sync
         const syncNotification = document.createElement('div');
         syncNotification.className = 'warning-message';
+        syncNotification.setAttribute('role', 'status');
+        syncNotification.setAttribute('aria-live', 'polite');
+        syncNotification.setAttribute('aria-atomic', 'true');
         syncNotification.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -181,7 +253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           syncNotification.classList.remove('warning-message');
           syncNotification.classList.add('success-message');
           syncNotification.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
             <span>Data synced successfully!</span>
@@ -195,7 +267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
           syncNotification.classList.add('error-message');
           syncNotification.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="15" y1="9" x2="9" y2="15"></line>
               <line x1="9" y1="9" x2="15" y2="15"></line>
@@ -290,6 +362,9 @@ async function initializeSyncTab() {
   const syncStatus = document.getElementById('syncStatus');
   const syncStatusIndicator = document.getElementById('syncStatusIndicator');
   const syncStatusMessage = document.getElementById('syncStatusMessage');
+  const onboardingStepConnect = document.querySelector('.onboarding-step[data-step="connect"]');
+  const onboardingStepSync = document.querySelector('.onboarding-step[data-step="sync"]');
+  const onboardingStepCreate = document.querySelector('.onboarding-step[data-step="create"]');
   
   // Load data again to be sure
   await loadDataFromStorage();
@@ -375,8 +450,9 @@ async function initializeSyncTab() {
     
     // Get sync settings and last sync time
     const syncSettings = await loadSyncSettings();
-    const { lastSyncTime } = await chrome.storage.local.get('lastSyncTime');
+    const { lastSyncTime, emojiCart } = await chrome.storage.local.get(['lastSyncTime', 'emojiCart']);
     const effectiveLastSync = syncSettings?.lastSuccessfulSync || lastSyncTime;
+    const hasCartItems = Array.isArray(emojiCart) && emojiCart.length > 0;
     
     if (workspaceCount > 0) {
       // Show connected state, hide empty state
@@ -395,7 +471,7 @@ async function initializeSyncTab() {
         const hours = Math.floor(timeSinceSync / (1000 * 60 * 60));
         const minutes = Math.floor((timeSinceSync % (1000 * 60 * 60)) / (1000 * 60));
         
-        let statusText = 'Last synced ';
+        let statusText = 'Last synced: ';
         
         if (hours > 24) {
           statusText += `${Math.floor(hours / 24)} day${Math.floor(hours / 24) > 1 ? 's' : ''} ago`;
@@ -406,31 +482,29 @@ async function initializeSyncTab() {
         } else {
           statusText += 'just now';
         }
-        
-        syncStatusText.textContent = statusText;
-        
+
         // Show next sync time if auto-sync is enabled
+        let nextSyncText = '';
         if (syncSettings?.autoSyncEnabled) {
-          const nextSyncTime = effectiveLastSync + (syncSettings.syncIntervalMinutes * 60 * 1000);
+          const intervalMinutes = syncSettings.syncIntervalMinutes || 60;
+          const nextSyncTime = effectiveLastSync + (intervalMinutes * 60 * 1000);
           const timeUntilSync = nextSyncTime - Date.now();
-          
           if (timeUntilSync > 0) {
             const hoursUntil = Math.floor(timeUntilSync / (1000 * 60 * 60));
             const minutesUntil = Math.floor((timeUntilSync % (1000 * 60 * 60)) / (1000 * 60));
-            
-            let nextSyncText = ' • Next sync in ';
-            if (hoursUntil > 0) {
-              nextSyncText += `${hoursUntil}h ${minutesUntil}m`;
-            } else {
-              nextSyncText += `${minutesUntil}m`;
-            }
-            syncStatusText.textContent += nextSyncText;
+            nextSyncText = hoursUntil > 0 ? `${hoursUntil}h ${minutesUntil}m` : `${minutesUntil}m`;
           } else {
-            syncStatusText.textContent += ' • Sync pending';
+            nextSyncText = 'pending';
           }
         }
+
+        syncStatusText.textContent = nextSyncText
+          ? `${statusText} | Next sync: ${nextSyncText}`
+          : `${statusText} | Auto-sync off`;
       } else {
-        syncStatusText.textContent = 'Never synced';
+        syncStatusText.textContent = syncSettings?.autoSyncEnabled
+          ? 'Last synced: never | Next sync: pending'
+          : 'Last synced: never | Auto-sync off';
       }
       
       refreshButton.disabled = false;
@@ -439,6 +513,16 @@ async function initializeSyncTab() {
       connectedState.style.display = 'none';
       emptyState.style.display = 'flex';
       refreshButton.disabled = true;
+    }
+
+    if (onboardingStepConnect) {
+      onboardingStepConnect.classList.toggle('is-complete', workspaceCount > 0);
+    }
+    if (onboardingStepSync) {
+      onboardingStepSync.classList.toggle('is-complete', !!effectiveLastSync);
+    }
+    if (onboardingStepCreate) {
+      onboardingStepCreate.classList.toggle('is-complete', hasCartItems);
     }
     
     // Update mobile tab QR code if the function exists and mobile tab is active
@@ -586,6 +670,7 @@ async function initializeSyncTab() {
 // Create Tab functionality
 function initializeCreateTab() {
   const emojiItems = document.getElementById('emojiItems');
+  const dropHint = document.getElementById('dropHint');
   const createActions = document.getElementById('createActions');
   const emojiSummary = document.getElementById('emojiSummary');
   const clearAllButton = document.getElementById('clearAllButton');
@@ -602,6 +687,7 @@ function initializeCreateTab() {
       
       // Update emoji display
       if (cart.length === 0) {
+        if (dropHint) dropHint.classList.remove('collapsed');
         emojiItems.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">✨</div>
@@ -612,21 +698,29 @@ function initializeCreateTab() {
         createActions.style.display = 'none';
         clearAllButton.style.display = 'none';
       } else {
+        if (dropHint) dropHint.classList.add('collapsed');
         // Show emoji items
         emojiItems.innerHTML = cart.map((emoji, index) => `
           <div class="emoji-item" data-index="${index}">
-            <img src="${emoji.url}" alt="${emoji.name}" class="emoji-item-image">
+            <img src="${emoji.imageDataUrl || emoji.url}" alt="${emoji.name}" class="emoji-item-image" width="48" height="48">
             <div class="emoji-item-info">
               <div class="emoji-item-name">
                 <input type="text" class="emoji-item-name-input" value="${emoji.name}" 
                        data-original-name="${emoji.name}" data-workspace="${emoji.workspace}"
+                       aria-label="Emoji name" aria-describedby="emoji-name-error-${index}" aria-invalid="false"
+                       name="emoji_name_${index}" autocomplete="off"
                        pattern="[a-z0-9_\\-]+" 
                        title="Use lowercase letters, numbers, underscores, and dashes only">
+                <div class="emoji-name-error" id="emoji-name-error-${index}" hidden>
+                  Use lowercase letters, numbers, underscores, and dashes only.
+                </div>
               </div>
               <div class="emoji-item-source">From ${emoji.source}</div>
+              ${emoji.imageFetchError ? `<div style="margin-top:4px;color:#dc2626;font-size:11px;">Image fetch failed: ${emoji.imageFetchError}</div>` : ''}
+              ${(!emoji.imageFetchError && emoji.imageDataSkipped) ? `<div style="margin-top:4px;color:#b45309;font-size:11px;">Large emoji saved by URL; upload will re-fetch.</div>` : ''}
             </div>
-            <button class="emoji-item-remove" data-name="${emoji.name}" data-workspace="${emoji.workspace}">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="emoji-item-remove" data-name="${emoji.name}" data-workspace="${emoji.workspace}" type="button" aria-label="Remove emoji">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
               </svg>
@@ -636,13 +730,25 @@ function initializeCreateTab() {
         
         createActions.style.display = 'block';
         clearAllButton.style.display = 'block';
-        emojiSummary.textContent = `${cart.length} emoji${cart.length > 1 ? 's' : ''} selected`;
+        emojiSummary.textContent = `${cart.length} emoji${cart.length > 1 ? 's' : ''} ready to send`;
         
         // Attach event listener to Send to Slack button after it's visible
         attachSendToSlackListener();
         
         // Add name input listeners
         document.querySelectorAll('.emoji-item-name-input').forEach(input => {
+          const errorElement = input.closest('.emoji-item-name')?.querySelector('.emoji-name-error');
+          const setError = (message) => {
+            if (!errorElement) return;
+            errorElement.textContent = message || '';
+            errorElement.hidden = !message;
+            input.setAttribute('aria-invalid', message ? 'true' : 'false');
+          };
+
+          input.addEventListener('input', () => {
+            setError('');
+          });
+
           input.addEventListener('change', async (e) => {
             const newName = e.target.value.trim();
             const originalName = input.getAttribute('data-original-name');
@@ -651,8 +757,10 @@ function initializeCreateTab() {
             // Validate name
             if (!newName || !/^[a-z0-9_-]+$/.test(newName)) {
               input.value = originalName; // Reset to original
+              setError('Use lowercase letters, numbers, underscores, and dashes only.');
               return;
             }
+            setError('');
             
             // Update the emoji name in cart
             const response = await chrome.runtime.sendMessage({ type: 'GET_CART_DATA' });
@@ -1085,11 +1193,11 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
         });
       } else {
         errorCount++;
-        
-        // Check if it's an authentication error
-        if (result.error && (result.error.includes('authentication') || 
+
+        const isAuthError = result.needsReauth || (result.error && (result.error.includes('authentication') || 
                            result.error.includes('not_authed') || 
-                           result.error.includes('invalid_auth'))) {
+                           result.error.includes('invalid_auth')));
+        if (isAuthError) {
           authFailed = true;
           results.push({
             name: emoji.name,
@@ -1124,7 +1232,7 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
   // Show final results
   if (authFailed) {
     if (createErrorText && createErrorMessage && createSuccessMessage) {
-      createErrorText.textContent = 'Authentication failed. Please visit your Slack workspace and try again.';
+      createErrorText.textContent = 'Authentication expired. We opened Slack. Sign in, then retry.';
       createErrorMessage.style.display = 'flex';
       createSuccessMessage.style.display = 'none';
     } else {
@@ -1132,7 +1240,7 @@ async function uploadEmojisToSlackDirectly(emojis, workspaceData) {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: 'Upload Failed',
-        message: 'Authentication failed. Please visit your Slack workspace and try again.'
+        message: 'Authentication expired. We opened Slack. Sign in, then retry.'
       });
     }
   } else if (successCount === emojis.length) {
@@ -1379,11 +1487,11 @@ async function uploadEmojisDirectly(emojis, workspaceData, dialog) {
         });
       } else {
         errorCount++;
-        
-        // Check if it's an authentication error
-        if (result.error && (result.error.includes('authentication') || 
+
+        const isAuthError = result.needsReauth || (result.error && (result.error.includes('authentication') || 
                            result.error.includes('not_authed') || 
-                           result.error.includes('invalid_auth'))) {
+                           result.error.includes('invalid_auth')));
+        if (isAuthError) {
           authFailed = true;
           results.push({
             name: emoji.name,
@@ -1428,10 +1536,10 @@ async function uploadEmojisDirectly(emojis, workspaceData, dialog) {
           <line x1="12" y1="8" x2="12" y2="12"></line>
           <line x1="12" y1="16" x2="12.01" y2="16"></line>
         </svg>
-        <span>Authentication Failed</span>
+        <span>Authentication Expired</span>
       </div>
       <p style="margin-top: 12px; color: #6b7280; font-size: 13px; line-height: 1.5;">
-        Your Slack session has expired. To fix this:
+        We opened Slack for you. To fix this:
       </p>
       <ol style="margin: 8px 0 0 20px; color: #6b7280; font-size: 13px; line-height: 1.6;">
         <li>Click "Visit Slack" below</li>

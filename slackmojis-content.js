@@ -13,6 +13,8 @@ function createAddButton(emojiUrl, emojiName, metadata = {}) {
   const button = document.createElement('button');
   button.className = 'emoji-studio-add-btn';
   button.title = 'Add to Emoji Studio'; // Tooltip
+  button.type = 'button';
+  button.setAttribute('aria-label', 'Add to Emoji Studio');
   
   // Create logo image or fallback
   let logoElement;
@@ -20,6 +22,9 @@ function createAddButton(emojiUrl, emojiName, metadata = {}) {
     if (chrome.runtime?.getURL) {
       const logoImg = document.createElement('img');
       logoImg.src = chrome.runtime.getURL('logo.png');
+      logoImg.alt = 'Emoji Studio';
+      logoImg.width = 20;
+      logoImg.height = 20;
       logoImg.style.cssText = `
         width: 20px;
         height: 20px;
@@ -56,27 +61,28 @@ function createAddButton(emojiUrl, emojiName, metadata = {}) {
   button.style.cssText = `
     background: #1a1a1a;
     color: white;
-    border: 2px solid white;
+    border: 1px solid rgba(255, 255, 255, 0.6);
     padding: 6px 10px;
     border-radius: 6px;
     cursor: pointer;
     margin-top: 4px;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 500;
     display: none;
     align-items: center;
     justify-content: center;
     position: relative;
     opacity: 0;
     gap: 4px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
   `;
   
   // Add hover effect
   button.addEventListener('mouseenter', () => {
     if (!button.disabled) {
       button.style.background = '#2a2a2a';
-      button.style.transform = 'scale(1.05)';
+      button.style.transform = 'scale(1.02)';
     }
   });
   
@@ -216,12 +222,15 @@ function createToast(message, type = 'success') {
   
   const toast = document.createElement('div');
   toast.className = 'emoji-studio-toast';
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+  toast.setAttribute('aria-atomic', 'true');
   
   // Try to get logo URL, fallback to emoji
   let logoHtml;
   try {
     if (chrome.runtime?.getURL) {
-      logoHtml = `<img src="${chrome.runtime.getURL('logo.png')}" style="width: 24px; height: 24px;">`;
+      logoHtml = `<img src="${chrome.runtime.getURL('logo.png')}" alt="Emoji Studio" width="24" height="24" style="width: 24px; height: 24px;">`;
     } else {
       logoHtml = `<span style="font-size: 24px;">😀</span>`;
     }
@@ -252,22 +261,23 @@ function createToast(message, type = 'success') {
     gap: 12px;
     z-index: 10000;
     animation: slideIn 0.3s ease-out;
-    border: 2px solid white;
+    border: 1px solid rgba(255, 255, 255, 0.6);
     max-width: 380px;
   `;
   
   // Style the button
   const button = toast.querySelector('.emoji-studio-toast-button');
+  button.type = 'button';
   button.style.cssText = `
     background: white;
     color: #1a1a1a;
     border: none;
     padding: 6px 16px;
     border-radius: 4px;
-    font-weight: 600;
+    font-weight: 500;
     font-size: 0.875rem;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   `;
   
   // Add button click handler
@@ -300,7 +310,7 @@ function createToast(message, type = 'success') {
         let updateLogoHtml;
         try {
           if (chrome.runtime?.getURL) {
-            updateLogoHtml = `<img src="${chrome.runtime.getURL('logo.png')}" style="width: 24px; height: 24px;">`;
+            updateLogoHtml = `<img src="${chrome.runtime.getURL('logo.png')}" alt="Emoji Studio" width="24" height="24" style="width: 24px; height: 24px;">`;
           } else {
             updateLogoHtml = `<span style="font-size: 24px;">😀</span>`;
           }
@@ -363,6 +373,18 @@ function createToast(message, type = 'success') {
         to {
           transform: translateX(100%);
           opacity: 0;
+        }
+      }
+
+      .emoji-studio-add-btn:focus-visible,
+      .emoji-studio-toast-button:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.8);
+        outline-offset: 2px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .emoji-studio-toast {
+          animation: none !important;
         }
       }
     `;
@@ -533,4 +555,3 @@ setTimeout(() => {
 }, 3000);
 
 })(); // End of IIFE
-

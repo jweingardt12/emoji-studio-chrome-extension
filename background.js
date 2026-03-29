@@ -1,8 +1,15 @@
 let capturedData = {};
+let lastBackgroundCaptureKey = null;
+let lastBackgroundCaptureTime = 0;
 let pendingRequestData = new Map();
 let lastNotificationTime = {}; // Track last notification time per workspace
 let emojiCart = []; // Cart to store emojis before adding to Emoji Studio
 let lastEmojiCheckData = {}; // Track last emoji check data for new emoji detection
+const MAX_DATA_URL_BYTES = 600000; // 0.6 MB per emoji
+const MAX_CART_DATA_BYTES = 4000000; // 4 MB total across cart
+const REAUTH_OPEN_COOLDOWN_MS = 60000;
+const UPLOAD_RETRY_DELAYS_MS = [500, 1000, 2000];
+const lastReauthOpenByWorkspace = new Map();
 
 // Analytics tracking removed for privacy
 
@@ -37,6 +44,320 @@ const EMOJI_STUDIO_URL = 'https://app.emojistudio.xyz';
 
 function getEmojiStudioUrl(path = '') {
   return path ? `${EMOJI_STUDIO_URL}${path}` : EMOJI_STUDIO_URL;
+}
+
+function extractWorkspaceFromUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const hostname = new URL(url).hostname;
+    const match = hostname.match(/^([^.]+)\.slack\.com$/);
+    return match ? match[1] : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function extractTeamIdFromCookie(cookie) {
+  if (!cookie) return null;
+  const match = cookie.match(/(?:^|;\s*)team_id=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+function extractTokenFromAuthorization(authHeader) {
+  if (!authHeader) return null;
+  const match = authHeader.match(/Bearer\s+(xox[a-zA-Z]-[\\w-]+)/);
+  return match ? match[1] : null;
+}
+
+function handleSlackDataCaptured(authData) {
+  if (!authData || !authData.workspace) {
+    return false;
+  }
+
+  const tokenForKey = authData.formToken || authData.token || '';
+  const captureKey = tokenForKey ? `${authData.workspace}_${tokenForKey.substring(0, 10)}` : authData.workspace;
+  const now = Date.now();
+  if (captureKey === lastBackgroundCaptureKey && (now - lastBackgroundCaptureTime) < 5000) {
+    return false;
+  }
+  lastBackgroundCaptureKey = captureKey;
+  lastBackgroundCaptureTime = now;
+
+  // Replace all existing data with this single workspace
+  capturedData = {};
+  capturedData[authData.workspace] = authData;
+
+  // Also store a curl command that can be reused later
+  console.log('Attempting to store curl command. Auth data:', {
+    hasToken: !!authData.token,
+    tokenType: authData.token ? authData.token.substring(0, 10) + '...' : 'none',
+    hasFormToken: !!authData.formToken,
+    formTokenType: authData.formToken ? authData.formToken.substring(0, 10) + '...' : 'none',
+    hasCookie: !!authData.cookie,
+    workspace: authData.workspace
+  });
+
+  // Prefer formToken (xoxc) over cookie token (xoxd)
+  const token = authData.formToken || authData.token;
+  console.log('Choosing token:', {
+    formToken: authData.formToken ? authData.formToken.substring(0, 15) + '...' : 'none',
+    cookieToken: authData.token ? authData.token.substring(0, 15) + '...' : 'none',
+    chosen: token ? token.substring(0, 15) + '...' : 'none'
+  });
+
+  if (token && authData.cookie && authData.workspace) {
+    const xId = authData.xId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const teamId = authData.teamId || '';
+    const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
+    const curlCommand = `curl 'https://${authData.workspace}.slack.com/api/emoji.adminList?_x_id=${xId}&_x_version_ts=noversion&fp=98' \\
+      -H 'accept: */*' \\
+      -H 'accept-language: en-US,en;q=0.9' \\
+      -H 'cache-control: no-cache' \\
+      -H 'content-type: multipart/form-data; boundary=${boundary}' \\
+      -b '${authData.cookie}' \\
+      -H 'pragma: no-cache' \\
+      -H 'sec-fetch-dest: empty' \\
+      -H 'sec-fetch-mode: cors' \\
+      -H 'sec-fetch-site: same-origin' \\
+      --data-raw $'------${boundary}\\r\\nContent-Disposition: form-data; name=\"token\"\\r\\n\\r\\n${token}\\r\\n------${boundary}\\r\\nContent-Disposition: form-data; name=\"count\"\\r\\n\\r\\n100000\\r\\n------${boundary}--\\r\\n'`;
+
+    console.log('Storing curl command for future use');
+    console.log('Token:', token ? token.substring(0, 15) + '...' : 'none');
+    console.log('Cookie length:', authData.cookie ? authData.cookie.length : 0);
+    capturedData[authData.workspace].storedCurlCommand = curlCommand;
+    capturedData[authData.workspace].token = token;
+  }
+
+  chrome.storage.local.set({
+    slackData: capturedData,
+    slackCurlCommand: capturedData[authData.workspace].storedCurlCommand || null
+  }, () => {
+    chrome.runtime.sendMessage({ type: 'DATA_UPDATED' }).catch(() => {});
+  });
+
+  chrome.action.setBadgeText({ text: '✓' });
+  chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+  return true;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function parseCookieString(cookie) {
+  const map = {};
+  if (!cookie) return map;
+  const parts = cookie.split(/;\s*/);
+  for (const part of parts) {
+    const eqIndex = part.indexOf('=');
+    if (eqIndex === -1) continue;
+    const name = part.slice(0, eqIndex).trim();
+    const value = part.slice(eqIndex + 1);
+    if (name) {
+      map[name] = value;
+    }
+  }
+  return map;
+}
+
+function safeJsonParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
+}
+
+function maybeOpenReauthTab(workspace) {
+  if (!workspace) return;
+  const now = Date.now();
+  const lastOpen = lastReauthOpenByWorkspace.get(workspace) || 0;
+  if (now - lastOpen < REAUTH_OPEN_COOLDOWN_MS) {
+    return;
+  }
+  lastReauthOpenByWorkspace.set(workspace, now);
+  const slackUrl = `https://${workspace}.slack.com/customize/emoji`;
+  chrome.tabs.create({ url: slackUrl }, () => {});
+}
+
+async function fetchImageDataUrl({ url, tabId, isSlackmojis }) {
+  if (!url) {
+    return { success: false, error: 'Missing image URL' };
+  }
+
+  try {
+    const fetchOptions = { method: 'GET' };
+    if (isSlackmojis) {
+      fetchOptions.referrer = 'https://slackmojis.com/';
+      fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
+    }
+
+    const response = await fetch(url, fetchOptions);
+    if (response.ok) {
+      const blob = await response.blob();
+      if (blob && blob.size > 0) {
+        const dataUrl = await blobToDataUrl(blob);
+        if (dataUrl && dataUrl.startsWith('data:')) {
+          return { success: true, dataUrl };
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[fetchImageDataUrl] Direct fetch failed:', error);
+  }
+
+  if (!tabId) {
+    return { success: false, error: 'No tab available for fallback fetch' };
+  }
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (imageUrl) => {
+        try {
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch (error) {
+          throw new Error('Content script fetch failed: ' + error.message);
+        }
+      },
+      args: [url]
+    });
+
+    const dataUrl = results?.[0]?.result;
+    if (dataUrl && dataUrl.startsWith('data:')) {
+      return { success: true, dataUrl };
+    }
+    return { success: false, error: 'Fallback fetch returned no data' };
+  } catch (error) {
+    return { success: false, error: error.message || 'Fallback fetch failed' };
+  }
+}
+
+function resolveSlackAuth(workspaceData, parsedCurl) {
+  const workspace = workspaceData?.workspace || parsedCurl?.workspace || null;
+  const authHeaders = workspaceData?.authHeaders || {};
+  const cookie = workspaceData?.authHeaders?.cookie || workspaceData?.cookie || parsedCurl?.cookie || '';
+  const cookieMap = parseCookieString(cookie);
+
+  let token = workspaceData?.token || null;
+  if (!token) {
+    token = workspaceData?.formToken || null;
+  }
+  if (!token && authHeaders.authorization) {
+    const authMatch = authHeaders.authorization.match(/Bearer\s+(xox[a-zA-Z]-[\w-]+)/);
+    if (authMatch) {
+      token = authMatch[1];
+    }
+  }
+
+  let dCookieTeamId = null;
+  let dCookieToken = null;
+  if (cookieMap.d) {
+    let decoded = cookieMap.d;
+    try {
+      decoded = decodeURIComponent(cookieMap.d);
+    } catch (error) {}
+
+    if (decoded.startsWith('xox')) {
+      dCookieToken = decoded;
+    } else {
+      const parsed = safeJsonParse(decoded);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.token && typeof parsed.token === 'string' && parsed.token.startsWith('xox')) {
+          dCookieToken = parsed.token;
+        }
+        if (parsed.team_id) {
+          dCookieTeamId = parsed.team_id;
+        } else if (parsed.teamId) {
+          dCookieTeamId = parsed.teamId;
+        }
+      }
+    }
+  }
+
+  if (!token && dCookieToken) {
+    token = dCookieToken;
+  }
+
+  if (!token && cookie) {
+    const tokenMatch = cookie.match(/\bxox[a-zA-Z]-[^\s;]+/);
+    if (tokenMatch) {
+      token = tokenMatch[0];
+    }
+  }
+
+  if (!token && parsedCurl?.token) {
+    token = parsedCurl.token;
+  }
+
+  let teamId = workspaceData?.teamId || '';
+  if (!teamId) {
+    const headerTeam = Object.entries(authHeaders).find(([key]) => key.toLowerCase() === 'x-slack-team-id');
+    if (headerTeam) {
+      teamId = headerTeam[1];
+    }
+  }
+  if (!teamId && cookieMap.team_id) {
+    teamId = cookieMap.team_id;
+  }
+  if (!teamId && dCookieTeamId) {
+    teamId = dCookieTeamId;
+  }
+  if (!teamId && parsedCurl?.teamId) {
+    teamId = parsedCurl.teamId;
+  }
+
+  let xId = workspaceData?.xId || parsedCurl?.xId || null;
+  if (!xId) {
+    xId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  return {
+    workspace,
+    token,
+    cookie,
+    teamId,
+    xId
+  };
+}
+
+function parseProxyResponse(response, text) {
+  const snippet = text ? text.slice(0, 200) : '';
+  let data = null;
+  if (text) {
+    data = safeJsonParse(text);
+  }
+  return {
+    ok: response.ok,
+    status: response.status,
+    data,
+    textSnippet: snippet
+  };
+}
+
+function isRetryableProxyFailure(status, errorCode) {
+  if (status === 429 || (status >= 500 && status <= 599)) {
+    return true;
+  }
+  if (!errorCode) return false;
+  const normalized = String(errorCode).toLowerCase();
+  return ['ratelimited', 'rate_limited', 'timeout', 'timed_out', 'internal_error', 'service_unavailable', 'server_error'].includes(normalized);
 }
 
 // Service workers in Manifest V3 should be allowed to go idle
@@ -806,79 +1127,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Background received message:', request.type);
   
   if (request.type === 'SLACK_DATA_CAPTURED') {
-    const workspace = request.data.workspace;
-    
-    
-    // Replace all existing data with this single workspace
-    capturedData = {};
-    capturedData[workspace] = request.data;
-    
-    // Also store a curl command that can be reused later
-    const authData = request.data;
-    console.log('Attempting to store curl command. Auth data:', {
-      hasToken: !!authData.token,
-      tokenType: authData.token ? authData.token.substring(0, 10) + '...' : 'none',
-      hasFormToken: !!authData.formToken,
-      formTokenType: authData.formToken ? authData.formToken.substring(0, 10) + '...' : 'none',
-      hasCookie: !!authData.cookie,
-      workspace: authData.workspace
-    });
-    
-    // Prefer formToken (xoxc) over cookie token (xoxd)
-    const token = authData.formToken || authData.token;
-    console.log('Choosing token:', {
-      formToken: authData.formToken ? authData.formToken.substring(0, 15) + '...' : 'none',
-      cookieToken: authData.token ? authData.token.substring(0, 15) + '...' : 'none',
-      chosen: token ? token.substring(0, 15) + '...' : 'none'
-    });
-    
-    if (token && authData.cookie && authData.workspace) {
-      const xId = authData.xId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const teamId = authData.teamId || '';
-      
-      // Construct curl command exactly like Emoji Studio expects - with multipart form data
-      const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
-      const curlCommand = `curl 'https://${authData.workspace}.slack.com/api/emoji.adminList?_x_id=${xId}&_x_version_ts=noversion&fp=98' \\
-        -H 'accept: */*' \\
-        -H 'accept-language: en-US,en;q=0.9' \\
-        -H 'cache-control: no-cache' \\
-        -H 'content-type: multipart/form-data; boundary=${boundary}' \\
-        -b '${authData.cookie}' \\
-        -H 'pragma: no-cache' \\
-        -H 'sec-fetch-dest: empty' \\
-        -H 'sec-fetch-mode: cors' \\
-        -H 'sec-fetch-site: same-origin' \\
-        --data-raw $'------${boundary}\\r\\nContent-Disposition: form-data; name="token"\\r\\n\\r\\n${token}\\r\\n------${boundary}\\r\\nContent-Disposition: form-data; name="count"\\r\\n\\r\\n100000\\r\\n------${boundary}--\\r\\n'`;
-      
-      console.log('Storing curl command for future use');
-      console.log('Token:', token ? token.substring(0, 15) + '...' : 'none');
-      console.log('Cookie length:', authData.cookie ? authData.cookie.length : 0);
-      capturedData[workspace].storedCurlCommand = curlCommand;
-      capturedData[workspace].token = token; // Also store the token directly
-    }
-    
-    chrome.storage.local.set({ 
-      slackData: capturedData,
-      slackCurlCommand: capturedData[workspace].storedCurlCommand || null
-    }, () => {
-      if (chrome.runtime.lastError) {
-      } else {
-        
-        // Verify it was saved
-        chrome.storage.local.get('slackData', (verifyResult) => {
-          if (verifyResult.slackData) {
-          }
-        });
-      }
-      
-      // Notify popup if it's open
-      chrome.runtime.sendMessage({ type: 'DATA_UPDATED' }).catch(() => {
-        // Popup might not be open, that's fine
-      });
-    });
-    
-    chrome.action.setBadgeText({ text: '✓' });
-    chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+    handleSlackDataCaptured(request.data);
     
     // Check if we should show notification
     const now = Date.now();
@@ -978,7 +1227,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Open Emoji Studio dashboard with sync parameter to indicate sync will start
     const emojiStudioUrl = getEmojiStudioUrl('/dashboard?syncStarting=true');
     console.log('[Background] Opening dashboard at:', emojiStudioUrl);
-    chrome.tabs.create({ url: emojiStudioUrl });
+    chrome.tabs.create({ url: emojiStudioUrl }, () => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      sendResponse({ success: true, opened: true });
+    });
     
     // Start sync after a short delay to ensure dashboard is ready for progress messages
     console.log('[Background] Setting up sync delay...');
@@ -986,10 +1241,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       console.log('[Background] Starting delayed sync...');
       syncToEmojiStudio(false).then(result => {
         console.log('[Background] Sync completed with result:', result);
-        sendResponse({ success: result.success, error: result.error });
       }).catch(error => {
         console.error('[Background] Sync failed with error:', error);
-        sendResponse({ success: false, error: error.message });
       });
     }, 1000); // 1 second delay
     return true; // Keep channel open for async response
@@ -1159,28 +1412,58 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
     
-    const emoji = request.emoji;
-    
+    const emoji = { ...request.emoji };
+
     // Validate emoji data
     if (!emoji || !emoji.name || !emoji.url) {
       console.warn('Invalid emoji data:', emoji);
       sendResponse({ success: false, error: 'Invalid emoji data' });
       return;
     }
-    
+
     // Handle data URLs for local uploads
     if (emoji.url.startsWith('data:')) {
       // Data URLs are already valid, no need to validate further
       console.log('Processing local file upload:', emoji.name);
     }
-    
+
     // Check if emoji already exists
     const exists = emojiCart.some(e => e.name === emoji.name && e.workspace === emoji.workspace);
-    
-    if (!exists) {
+
+    if (exists) {
+      console.log('Emoji already in cart');
+      sendResponse({ success: false, error: 'Already in cart' });
+      return;
+    }
+
+    (async () => {
+      // Prefetch Slackmojis images when possible (hybrid mode)
+      if (emoji.source === 'slackmojis' && emoji.url && !emoji.url.startsWith('data:')) {
+        const currentBytes = emojiCart.reduce((sum, item) => sum + (item.imageDataBytes || 0), 0);
+        const tabId = sender?.tab?.id;
+
+        const prefetch = await fetchImageDataUrl({
+          url: emoji.url,
+          tabId,
+          isSlackmojis: true
+        });
+
+        if (prefetch.success && prefetch.dataUrl) {
+          const approxBytes = Math.floor(prefetch.dataUrl.length * 0.75);
+          if (approxBytes <= MAX_DATA_URL_BYTES && (currentBytes + approxBytes) <= MAX_CART_DATA_BYTES) {
+            emoji.imageDataUrl = prefetch.dataUrl;
+            emoji.imageDataBytes = approxBytes;
+          } else {
+            emoji.imageDataSkipped = true;
+          }
+        } else {
+          emoji.imageFetchError = prefetch.error || 'Failed to prefetch image';
+        }
+      }
+
       emojiCart.push(emoji);
       console.log('Cart now has', emojiCart.length, 'items');
-      
+
       // Save to storage
       chrome.storage.local.set({ emojiCart: emojiCart }, () => {
         if (chrome.runtime.lastError) {
@@ -1192,11 +1475,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: true, cartSize: emojiCart.length });
         }
       });
-    } else {
-      console.log('Emoji already in cart');
-      sendResponse({ success: false, error: 'Already in cart' });
-    }
-    
+    })();
+
     return true; // Keep channel open for async response
   } else if (request.type === 'GET_CART_DATA') {
     // Ensure we have the latest cart data
@@ -1502,128 +1782,58 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // First, check if we have a stored curl command
       const storedData = await chrome.storage.local.get(['slackCurlCommand', 'slackData']);
       
-      if (storedData.slackCurlCommand) {
-        console.log('Using stored curl command for upload');
-        // Parse the stored curl command to get auth data
-        const parsedCurl = parseSlackCurl(storedData.slackCurlCommand);
-        if (parsedCurl.isValid) {
-          // Override with stored auth data
-          workspaceData = {
-            workspace: parsedCurl.workspace || workspaceData.workspace,
-            token: parsedCurl.token,
-            cookie: parsedCurl.cookie,
-            teamId: parsedCurl.teamId || workspaceData.teamId,
-            xId: parsedCurl.xId || workspaceData.xId
-          };
+      if (!workspaceData && storedData.slackData) {
+        const workspaces = Object.keys(storedData.slackData);
+        if (workspaces.length > 0) {
+          workspaceData = storedData.slackData[workspaces[0]];
         }
       }
-      
-      // Validate we have the necessary auth data
-      if (!workspaceData || !workspaceData.workspace) {
+
+      const parsedCurl = storedData.slackCurlCommand ? parseSlackCurl(storedData.slackCurlCommand) : null;
+      const resolvedAuth = resolveSlackAuth(workspaceData, parsedCurl);
+      const { workspace, token, cookie, teamId, xId } = resolvedAuth;
+
+      if (!workspace) {
         sendResponse({ success: false, error: 'Missing Slack authentication data' });
         return;
       }
-      
-      // Check if we have some form of authentication
-      if (!workspaceData.token && !workspaceData.cookie) {
-        sendResponse({ success: false, error: 'No authentication credentials found. Please visit your Slack workspace emoji page.' });
+
+      if (!token && !cookie) {
+        maybeOpenReauthTab(workspace);
+        sendResponse({ success: false, error: 'No authentication credentials found. Please visit your Slack workspace emoji page.', needsReauth: true });
         return;
       }
-      
-      try {
-      // Parse headers to extract needed values
-      const cookie = workspaceData.authHeaders?.cookie || workspaceData.cookie || '';
-      const xSlackClientId = workspaceData.xSlackClientId || '';
-      
-      // Extract token from various sources
-      let token = workspaceData.token || workspaceData.formToken || '';
-      
-      // If no token yet, try to extract from cookie
-      if (!token && cookie) {
-        // Try to find xox token in cookies
-        const cookies = cookie.split(/;\s*/);
-        for (const c of cookies) {
-          const [name, value] = c.split('=');
-          if (name === 'd' && value) {
-            try {
-              const decodedValue = decodeURIComponent(value);
-              if (decodedValue.startsWith('xox')) {
-                token = decodedValue;
-                break;
-              }
-            } catch (e) {
-              if (value.startsWith('xox')) {
-                token = value;
-                break;
-              }
-            }
-          }
-        }
-        
-        // Fallback to regex match
-        if (!token) {
-          const tokenMatch = cookie.match(/\bxox[a-zA-Z]-[^\s;]+/);
-          if (tokenMatch) {
-            token = tokenMatch[0];
-          }
-        }
-      }
-      
-      // Also check if token is in the authHeaders
-      if (!token && workspaceData.authHeaders?.authorization) {
-        const authMatch = workspaceData.authHeaders.authorization.match(/Bearer\s+(xox[a-zA-Z]-[\w-]+)/);
-        if (authMatch) {
-          token = authMatch[1];
-        }
-      }
-      
+
       if (!token) {
         console.error('No token found. Debug info:', {
           hasWorkspaceData: !!workspaceData,
-          hasToken: !!workspaceData.token,
-          hasFormToken: !!workspaceData.formToken,
-          hasCookie: !!workspaceData.cookie,
-          hasAuthHeaders: !!workspaceData.authHeaders,
-          cookieLength: workspaceData.cookie ? workspaceData.cookie.length : 0
+          hasToken: !!workspaceData?.token,
+          hasFormToken: !!workspaceData?.formToken,
+          hasCookie: !!cookie,
+          hasAuthHeaders: !!workspaceData?.authHeaders,
+          cookieLength: cookie ? cookie.length : 0
         });
-        sendResponse({ success: false, error: 'No Slack token found. Please visit your Slack workspace emoji page.' });
+        maybeOpenReauthTab(workspace);
+        sendResponse({ success: false, error: 'No Slack token found. Please visit your Slack workspace emoji page.', needsReauth: true });
         return;
       }
-      
+
       console.log('Using token:', token.substring(0, 15) + '...');
-      
-      // Extract team ID from various sources
-      let teamId = workspaceData.teamId || '';
-      if (!teamId && workspaceData.authHeaders) {
-        // Try to extract from x-slack-team-id header
-        const teamHeader = Object.entries(workspaceData.authHeaders).find(([key, value]) => 
-          key.toLowerCase() === 'x-slack-team-id'
-        );
-        if (teamHeader) {
-          teamId = teamHeader[1];
-        }
-      }
-      if (!teamId && cookie) {
-        // Try to extract from cookie
-        const teamMatch = cookie.match(/\bd=([^;]+)/);
-        if (teamMatch) {
-          try {
-            const dCookie = JSON.parse(decodeURIComponent(teamMatch[1]));
-            teamId = dCookie.team_id || '';
-          } catch (e) {
-            console.warn('Failed to parse d cookie:', e);
-          }
-        }
-      }
-      
+
       // Prepare the emoji data
       let imageBlob;
       let fileName;
       let mimeType;
-      
-      if (emoji.url.startsWith('data:')) {
+
+      const imageSource = emoji.imageDataUrl || emoji.url;
+      if (!imageSource) {
+        sendResponse({ success: false, error: 'Missing emoji image data' });
+        return;
+      }
+
+      if (imageSource.startsWith('data:')) {
         // Local upload - convert data URL to blob
-        const response = await fetch(emoji.url);
+        const response = await fetch(imageSource);
         imageBlob = await response.blob();
         mimeType = imageBlob.type;
         
@@ -1634,12 +1844,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else {
         // Remote URL - fetch the image
         try {
-          const response = await fetch(emoji.url);
+          const response = await fetch(imageSource);
           imageBlob = await response.blob();
           mimeType = imageBlob.type || 'image/png';
           
           // Determine file extension from URL or mime type
-          const urlExt = emoji.url.match(/\.([^.]+)$/);
+          const urlExt = imageSource.match(/\.([^.]+)$/);
           const extension = urlExt ? urlExt[1].toLowerCase() : 
                            mimeType.includes('gif') ? 'gif' : 'png';
           fileName = `${emoji.name}.${extension}`;
@@ -1666,11 +1876,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       formData.append('_x_mode', 'online');
       
       // Extract x_id from stored data or generate one
-      const xId = workspaceData.xId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const resolvedXId = xId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const slackRoute = teamId || '';
       
       // Construct the upload URL
-      const uploadUrl = `https://${workspaceData.workspace}.slack.com/api/emoji.add?_x_id=${xId}&slack_route=${slackRoute}&_x_version_ts=noversion&fp=5c&_x_num_retries=0`;
+      const uploadUrl = `https://${workspace}.slack.com/api/emoji.add?_x_id=${resolvedXId}&slack_route=${slackRoute}&_x_version_ts=noversion&fp=5c&_x_num_retries=0`;
       
       console.log('Uploading to:', uploadUrl);
       
@@ -1702,14 +1912,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           + ` --form 'name=${emoji.name}' --form 'mode=data' --form '_x_reason=add-custom-emoji-dialog-content' --form '_x_mode=online' --form 'image=@${fileName}'`;
       } else {
         // Construct new curl command
-        curlCommand = `curl 'https://${workspaceData.workspace}.slack.com/api/emoji.add?_x_id=${xId}&slack_route=${teamId}&_x_version_ts=noversion&fp=5c&_x_num_retries=0' \\
+        curlCommand = `curl 'https://${workspace}.slack.com/api/emoji.add?_x_id=${resolvedXId}&slack_route=${teamId}&_x_version_ts=noversion&fp=5c&_x_num_retries=0' \\
           -H 'Accept: */*' \\
           -H 'Accept-Language: en-US,en;q=0.9' \\
           -H 'Cache-Control: no-cache' \\
           -H 'Content-Type: multipart/form-data' \\
           -H 'Cookie: ${cookie}' \\
-          -H 'Origin: https://${workspaceData.workspace}.slack.com' \\
-          -H 'Referer: https://${workspaceData.workspace}.slack.com/customize/emoji' \\
+          -H 'Origin: https://${workspace}.slack.com' \\
+          -H 'Referer: https://${workspace}.slack.com/customize/emoji' \\
           -H 'Sec-Ch-Ua: "Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"' \\
           -H 'Sec-Ch-Ua-Mobile: ?0' \\
           -H 'Sec-Ch-Ua-Platform: "macOS"' \\
@@ -1743,96 +1953,130 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
       // Now perform the upload using the same approach as Emoji Studio
       try {
-        // Create a proxy request that mimics what Emoji Studio does
-        const proxyResponse = await fetch(`${EMOJI_STUDIO_URL}/api/slack-emoji-upload`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: uploadUrl,
-            formData: formDataObj,
+        const attemptUpload = async () => {
+          const proxyResponse = await fetch(`${EMOJI_STUDIO_URL}/api/slack-emoji-upload`, {
+            method: 'POST',
             headers: {
-              'Accept': '*/*',
-              'Accept-Language': 'en-US,en;q=0.9',
-              'Cache-Control': 'no-cache',
-              'Origin': `https://${workspaceData.workspace}.slack.com`,
-              'Referer': `https://${workspaceData.workspace}.slack.com/customize/emoji`,
-              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Cookie': cookie,
-              'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-              'Sec-Ch-Ua-Mobile': '?0',
-              'Sec-Ch-Ua-Platform': '"macOS"',
-              'Sec-Fetch-Dest': 'empty',
-              'Sec-Fetch-Mode': 'cors',
-              'Sec-Fetch-Site': 'same-origin'
+              'Content-Type': 'application/json',
             },
-            blob: dataUrl,
-            fileName: fileName,
-            mimeType: mimeType
-          })
-        });
-        
-        const result = await proxyResponse.json();
-        console.log('Upload result:', result);
-        
-        if (result.success && result.data && result.data.ok) {
-          // Schedule a background sync to fetch the new emoji
-          console.log('[Upload] Emoji uploaded successfully, scheduling background sync...');
-          
-          const workspace = workspaceData.workspace;
-          if (workspace) {
-            // Schedule sync with 3 second delay (will be debounced if multiple uploads)
-            scheduleBackgroundSync(workspace, 3000);
+            body: JSON.stringify({
+              url: uploadUrl,
+              formData: formDataObj,
+              headers: {
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cache-Control': 'no-cache',
+                'Origin': `https://${workspace}.slack.com`,
+                'Referer': `https://${workspace}.slack.com/customize/emoji`,
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Cookie': cookie,
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"macOS"',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin'
+              },
+              blob: dataUrl,
+              fileName: fileName,
+              mimeType: mimeType
+            })
+          });
+
+          const bodyText = await proxyResponse.text();
+          const parsed = parseProxyResponse(proxyResponse, bodyText);
+
+          if (!parsed.ok) {
+            const authCode = (parsed.status === 401 || parsed.status === 403) ? 'invalid_auth' : null;
+            return {
+              success: false,
+              retryable: isRetryableProxyFailure(parsed.status),
+              errorCode: authCode,
+              errorMessage: `Proxy HTTP ${parsed.status}: ${parsed.textSnippet || 'no response body'}`
+            };
           }
-          
-          sendResponse({ success: true, emojiName: emoji.name });
-        } else {
-          // Handle error cases
-          let errorMessage = 'Upload failed';
+
+          const result = parsed.data;
+          if (!result || typeof result !== 'object') {
+            return { success: false, retryable: false, errorMessage: 'Invalid proxy response' };
+          }
+
+          console.log('Upload result:', result);
+
+          if (result.success && result.data && result.data.ok) {
+            return { success: true, result };
+          }
+
           const errorCode = result.error || result.details?.error || result.data?.error;
-          
-          console.error('Upload failed with error:', errorCode);
-          console.error('Full result:', JSON.stringify(result, null, 2));
-          
-          if (errorCode === 'error_name_taken') {
-            errorMessage = `Emoji name "${emoji.name}" is already taken`;
-          } else if (errorCode === 'error_bad_name_i18n') {
-            errorMessage = `Invalid emoji name "${emoji.name}"`;
-          } else if (errorCode === 'error_missing_scope') {
-            errorMessage = 'Missing permissions to upload emojis';
-          } else if (errorCode === 'not_authed' || errorCode === 'invalid_auth') {
-            errorMessage = 'Slack authentication failed. Please visit your Slack workspace and try again.';
-            console.error('Auth details:', {
-              tokenType: token ? token.substring(0, 4) : 'none',
-              tokenLength: token ? token.length : 0,
-              cookieLength: cookie ? cookie.length : 0,
-              hasTeamId: !!teamId,
-              hasXId: !!xId
-            });
-          } else if (errorCode) {
-            errorMessage = errorCode;
+          return {
+            success: false,
+            retryable: isRetryableProxyFailure(parsed.status, errorCode),
+            errorCode,
+            errorMessage: errorCode || 'Upload failed',
+            result
+          };
+        };
+
+        let lastFailure = null;
+        for (let attempt = 0; attempt <= UPLOAD_RETRY_DELAYS_MS.length; attempt++) {
+          let outcome;
+          try {
+            outcome = await attemptUpload();
+          } catch (error) {
+            outcome = {
+              success: false,
+              retryable: true,
+              errorMessage: error.message || 'Network error. Please check your connection.'
+            };
           }
-          
-          sendResponse({ success: false, error: errorMessage });
+
+          if (outcome.success) {
+            console.log('[Upload] Emoji uploaded successfully, scheduling background sync...');
+            if (workspace) {
+              scheduleBackgroundSync(workspace, 3000);
+            }
+            sendResponse({ success: true, emojiName: emoji.name });
+            return;
+          }
+
+          lastFailure = outcome;
+          if (outcome.retryable && attempt < UPLOAD_RETRY_DELAYS_MS.length) {
+            console.warn(`[Upload] Attempt ${attempt + 1} failed, retrying...`, outcome.errorMessage);
+            await sleep(UPLOAD_RETRY_DELAYS_MS[attempt]);
+            continue;
+          }
+          break;
         }
+
+        const errorCode = lastFailure?.errorCode;
+        let errorMessage = lastFailure?.errorMessage || 'Upload failed';
+
+        if (errorCode === 'error_name_taken') {
+          errorMessage = `Emoji name "${emoji.name}" is already taken`;
+        } else if (errorCode === 'error_bad_name_i18n') {
+          errorMessage = `Invalid emoji name "${emoji.name}"`;
+        } else if (errorCode === 'error_missing_scope') {
+          errorMessage = 'Missing permissions to upload emojis';
+        } else if (errorCode === 'not_authed' || errorCode === 'invalid_auth') {
+          errorMessage = 'Authentication expired. We opened Slack. Sign in, then retry.';
+          console.error('Auth details:', {
+            tokenType: token ? token.substring(0, 4) : 'none',
+            tokenLength: token ? token.length : 0,
+            cookieLength: cookie ? cookie.length : 0,
+            hasTeamId: !!teamId,
+            hasXId: !!xId
+          });
+          maybeOpenReauthTab(workspace);
+          sendResponse({ success: false, error: errorMessage, needsReauth: true });
+          return;
+        } else if (errorCode) {
+          errorMessage = errorCode;
+        }
+
+        sendResponse({ success: false, error: errorMessage });
       } catch (error) {
         console.error('Proxy upload failed:', error);
-        
-        // If the upload fails due to auth, suggest reconnecting
-        if (error.message && (error.message.includes('not_authed') || error.message.includes('invalid_auth'))) {
-          // Open a Slack tab to refresh authentication
-          const slackUrl = `https://${workspaceData.workspace}.slack.com/customize/emoji`;
-          chrome.tabs.create({ url: slackUrl }, (tab) => {
-            sendResponse({ 
-              success: false, 
-              error: 'Authentication expired. Please sign in to Slack and try again.',
-              needsReauth: true 
-            });
-          });
-        } else {
-          sendResponse({ success: false, error: 'Network error. Please check your connection.' });
-        }
+        sendResponse({ success: false, error: 'Network error. Please check your connection.' });
       }
       
       } catch (error) {
@@ -1892,6 +2136,73 @@ chrome.webRequest.onBeforeRequest.addListener(
           }
         }
       }
+
+      // If still no token, attempt to parse raw request body (JSON or urlencoded)
+      if (!formToken && details.requestBody && details.requestBody.raw && details.requestBody.raw.length > 0) {
+        try {
+          const decoder = new TextDecoder('utf-8');
+          const rawParts = details.requestBody.raw
+            .map((entry) => entry.bytes || entry)
+            .filter(Boolean)
+            .map((bytes) => decoder.decode(bytes));
+          const rawBody = rawParts.join('');
+          console.log('Raw body length:', rawBody.length);
+
+          const tokenRegex = /xox[a-zA-Z]-[A-Za-z0-9-]+/;
+          const regexMatch = rawBody.match(tokenRegex);
+          if (regexMatch && regexMatch[0]) {
+            formToken = regexMatch[0];
+            console.log('✅ Extracted token from raw body (regex):', formToken.substring(0, 15) + '...');
+          }
+
+          if (!formToken) {
+            try {
+              const params = new URLSearchParams(rawBody);
+              const tokenParam = params.get('token') || params.get('api_token');
+              if (tokenParam) {
+                formToken = tokenParam;
+                console.log('✅ Extracted token from raw body (urlencoded):', formToken.substring(0, 15) + '...');
+              } else {
+                for (const [key, value] of params.entries()) {
+                  if (value && value.startsWith && value.startsWith('xox')) {
+                    console.log(`Found token in param '${key}':`, value.substring(0, 15) + '...');
+                    formToken = value;
+                    break;
+                  }
+                }
+              }
+            } catch (error) {
+            }
+          }
+
+          if (!formToken) {
+            try {
+              const json = JSON.parse(rawBody);
+              const stack = [json];
+              while (stack.length > 0 && !formToken) {
+                const current = stack.pop();
+                if (!current) continue;
+                if (typeof current === 'string') {
+                  if (current.startsWith('xox')) {
+                    formToken = current;
+                    break;
+                  }
+                } else if (Array.isArray(current)) {
+                  current.forEach((value) => stack.push(value));
+                } else if (typeof current === 'object') {
+                  Object.values(current).forEach((value) => stack.push(value));
+                }
+              }
+              if (formToken) {
+                console.log('✅ Extracted token from raw body (json):', formToken.substring(0, 15) + '...');
+              }
+            } catch (error) {
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to decode raw request body:', error);
+        }
+      }
       
       // Also check for tokens in the URL
       const urlMatch = details.url.match(/[?&]token=([^&]+)/);
@@ -1917,7 +2228,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
     }
   },
-  { urls: ["https://*.slack.com/api/*"] },
+  { urls: ["https://*.slack.com/api/*", "https://slack.com/api/*"] },
   ["requestBody"]
 );
 
@@ -1966,12 +2277,33 @@ chrome.webRequest.onSendHeaders.addListener(
           formToken: formToken
         }).catch(err => {});
       }
+
+      const tokenFromAuth = extractTokenFromAuthorization(headers.authorization);
+      const token = formToken || tokenFromAuth;
+      const workspace = extractWorkspaceFromUrl(details.url) ||
+        extractWorkspaceFromUrl(headers.referer) ||
+        extractWorkspaceFromUrl(headers.origin) ||
+        extractWorkspaceFromUrl(details.initiator) ||
+        extractWorkspaceFromUrl(details.originUrl);
+
+      if (workspace && token && headers.cookie) {
+        handleSlackDataCaptured({
+          workspace,
+          token: tokenFromAuth || token,
+          formToken: formToken || null,
+          cookie: headers.cookie || null,
+          teamId: extractTeamIdFromCookie(headers.cookie),
+          xId: headers['x-slack-client-request-id'] || null,
+          capturedFromAPI: true,
+          requestUrl: details.url || null
+        });
+      }
       
       // Clean up stored data
       pendingRequestData.delete(details.requestId);
     }
   },
-  { urls: ["https://*.slack.com/api/*"] },
+  { urls: ["https://*.slack.com/api/*", "https://slack.com/api/*"] },
   ["requestHeaders", "extraHeaders"]  // Added extraHeaders for more complete header access
 );
 

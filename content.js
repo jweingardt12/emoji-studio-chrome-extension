@@ -8,6 +8,7 @@ let hasCheckedEmojiPage = false; // Track if we've already checked the emoji pag
 let rainbowButtonInjected = false;
 let rainbowButtonElement = null;
 let rainbowButtonObserver = null;
+const EMOJI_STUDIO_URL = 'https://app.emojistudio.xyz';
 
 // Helper function to check if on emoji customization page (DRY)
 function isOnEmojiPage() {
@@ -243,6 +244,11 @@ function injectRainbowButtonStyles() {
       pointer-events: none;
     }
 
+    #emoji-studio-rainbow-btn:focus-visible {
+      outline: 2px solid rgba(255, 255, 255, 0.8);
+      outline-offset: 2px;
+    }
+
     #emoji-studio-rainbow-btn:hover {
       transform: translateY(-2px);
     }
@@ -300,6 +306,18 @@ function injectRainbowButtonStyles() {
       pointer-events: none;
       opacity: 0.5;
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      #emoji-studio-rainbow-btn {
+        animation: none !important;
+        transition: none !important;
+      }
+
+      #emoji-studio-rainbow-btn::before,
+      #emoji-studio-rainbow-btn::after {
+        animation: none !important;
+      }
+    }
   `;
 
   document.head.appendChild(styles);
@@ -314,6 +332,8 @@ function createRainbowSyncButton() {
       src="${chrome.runtime.getURL('logo.png')}"
       class="emoji-studio-rainbow-btn-logo"
       alt="Emoji Studio"
+      width="16"
+      height="16"
       onerror="this.style.display='none'"
     />
     <span class="emoji-studio-rainbow-btn-text">Sync with Emoji Studio</span>
@@ -328,7 +348,27 @@ function createRainbowSyncButton() {
     if (textSpan) textSpan.textContent = 'Syncing...';
 
     // Send sync message
-    chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO_AND_OPEN' });
+    try {
+      let didRespond = false;
+      const fallbackTimer = setTimeout(() => {
+        if (!didRespond) {
+          console.warn('[Emoji Studio] No background response, opening dashboard directly');
+          window.open(`${EMOJI_STUDIO_URL}/dashboard?syncStarting=true`, '_blank', 'noopener');
+        }
+      }, 600);
+
+      chrome.runtime.sendMessage({ type: 'SYNC_TO_EMOJI_STUDIO_AND_OPEN' }, () => {
+        didRespond = true;
+        clearTimeout(fallbackTimer);
+        if (chrome.runtime.lastError) {
+          console.warn('[Emoji Studio] Failed to message background:', chrome.runtime.lastError.message);
+          window.open(`${EMOJI_STUDIO_URL}/dashboard?syncStarting=true`, '_blank', 'noopener');
+        }
+      });
+    } catch (error) {
+      console.warn('[Emoji Studio] Failed to send message:', error);
+      window.open(`${EMOJI_STUDIO_URL}/dashboard?syncStarting=true`, '_blank', 'noopener');
+    }
 
     // Reset button after delay
     setTimeout(() => {
@@ -473,14 +513,19 @@ function checkAutoSync() {
   if (sessionStorage.getItem('emojiStudioAutoSync') === 'true') {
     console.log('[Emoji Studio Extension] Auto-sync flag detected, waiting for data capture...');
     sessionStorage.removeItem('emojiStudioAutoSync');
+
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     
     // Show a loading notification
     const notification = document.createElement('div');
     notification.className = 'emoji-studio-notification';
+    notification.setAttribute('role', 'status');
+    notification.setAttribute('aria-live', 'polite');
+    notification.setAttribute('aria-atomic', 'true');
     notification.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px;">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M12 2v4m0 12v4m-8-8h4m12 0h4" stroke-linecap="round" style="animation: spin 1s linear infinite; transform-origin: center;"></path>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+          <path d="M12 2v4m0 12v4m-8-8h4m12 0h4" stroke-linecap="round" style="${reduceMotion ? '' : 'animation: spin 1s linear infinite; transform-origin: center;'}"></path>
         </svg>
         <span style="font-size: 12px;">Fetching emojis...</span>
       </div>
@@ -498,18 +543,20 @@ function checkAutoSync() {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 11px;
       line-height: 1.2;
-      animation: slideIn 0.2s ease-out;
+      ${reduceMotion ? '' : 'animation: slideIn 0.2s ease-out;'}
     `;
     
     // Add spinning animation
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-    `;
-    document.head.appendChild(style);
+    if (!reduceMotion) {
+      const style = document.createElement('style');
+      style.textContent = `
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
     document.body.appendChild(notification);
     
     // Wait a bit for data to be captured, then trigger sync
@@ -520,7 +567,7 @@ function checkAutoSync() {
       // Update notification
       notification.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
           <span style="font-size: 12px;">Syncing emojis...</span>
@@ -2171,6 +2218,7 @@ class BulkReactionManager {
         font-size: 15px !important;
         border-radius: 6px !important;
         transition: background-color 0.1s ease !important;
+        font-weight: 500 !important;
       }
 
       .emoji-studio-bulk-btn:hover {
@@ -2195,10 +2243,11 @@ class BulkReactionManager {
         background: transparent;
         cursor: pointer;
         font-size: 13px;
+        font-weight: 500;
         margin-left: 4px;
         vertical-align: middle;
         color: var(--sk_foreground_low, #616061);
-        transition: all 0.1s ease;
+        transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease, transform 0.1s ease;
       }
 
       .emoji-studio-bulk-btn-inline:hover {
@@ -2216,6 +2265,12 @@ class BulkReactionManager {
       .sk-client-theme--dark .emoji-studio-bulk-btn-inline:hover {
         background: rgba(255, 255, 255, 0.08);
         border-color: var(--sk_foreground_low_solid, #565856);
+      }
+
+      .emoji-studio-bulk-btn:focus-visible,
+      .emoji-studio-bulk-btn-inline:focus-visible {
+        outline: 2px solid var(--sk_highlight, #1d9bd1);
+        outline-offset: 2px;
       }
 
       /* Emoji multi-select in picker - My Emojis tab */
@@ -2351,8 +2406,8 @@ class BulkReactionManager {
         border: none;
         cursor: pointer;
         font-size: 12px;
-        font-weight: 600;
-        transition: all 0.15s ease;
+        font-weight: 500;
+        transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
       }
 
       .emoji-studio-bulk-bar-btn.primary {
@@ -2411,7 +2466,7 @@ class BulkReactionManager {
         border-radius: 4px;
         cursor: pointer;
         flex-shrink: 0;
-        transition: all 0.15s ease;
+        transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
       }
 
       .emoji-studio-emoji-chip:hover {
@@ -2445,6 +2500,12 @@ class BulkReactionManager {
         opacity: 1;
       }
 
+      .emoji-studio-bulk-bar-btn:focus-visible,
+      .emoji-studio-emoji-chip:focus-visible {
+        outline: 2px solid var(--sk_highlight, #1d9bd1);
+        outline-offset: 2px;
+      }
+
       .emoji-studio-bulk-bar-placeholder {
         color: rgba(255, 255, 255, 0.4);
         font-size: 12px;
@@ -2474,6 +2535,19 @@ class BulkReactionManager {
 
       @keyframes emoji-studio-spin {
         to { transform: rotate(360deg); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .emoji-studio-bulk-btn,
+        .emoji-studio-bulk-btn-inline,
+        .emoji-studio-bulk-bar-btn,
+        .emoji-studio-emoji-chip {
+          transition: none !important;
+        }
+
+        .emoji-studio-bulk-bar-spinner {
+          animation: none !important;
+        }
       }
 
       .emoji-studio-bulk-bar-success {
@@ -3315,8 +3389,9 @@ class InlineButtonInjector {
     const bulkBtn = document.createElement('button');
     bulkBtn.className = 'emoji-studio-bulk-btn-inline';
     bulkBtn.innerHTML = '⚡';
-    bulkBtn.title = 'Bulk add reactions';
-    bulkBtn.setAttribute('aria-label', 'Bulk add reactions');
+    bulkBtn.type = 'button';
+    bulkBtn.title = 'Bulk add reactions (Emoji Studio)';
+    bulkBtn.setAttribute('aria-label', 'Bulk add reactions (Emoji Studio)');
 
     bulkBtn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -3366,8 +3441,9 @@ class InlineButtonInjector {
     const bulkBtn = document.createElement('button');
     bulkBtn.className = 'emoji-studio-bulk-btn c-button-unstyled c-menu_item__button c-menu_item--compact';
     bulkBtn.innerHTML = '⚡';
-    bulkBtn.title = 'Bulk add reactions';
-    bulkBtn.setAttribute('aria-label', 'Bulk add reactions');
+    bulkBtn.type = 'button';
+    bulkBtn.title = 'Bulk add reactions (Emoji Studio)';
+    bulkBtn.setAttribute('aria-label', 'Bulk add reactions (Emoji Studio)');
 
     bulkBtn.addEventListener('click', (e) => {
       e.preventDefault();

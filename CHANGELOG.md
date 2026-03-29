@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.0] - 2025-12-11
+
+### Added
+- **Rainbow Sync Button**: New MagicUI-styled rainbow button on Slack's emoji customization page
+  - Persistent button positioned inline with "Add Alias" and "Add Custom Emoji" buttons
+  - Animated rainbow gradient border with glow effect
+  - Entry animation with scale bounce on page load
+  - Shimmer effect that sweeps across the button
+  - Dark mode support with inverted colors
+
+### Removed
+- **Legacy Transient Banner**: Removed the old green notification banner that auto-dismissed after 5-10 seconds
+  - The new rainbow button provides a better, always-visible sync experience
+
+### Improved
+- Better visual hierarchy on the emoji customization page
+- More discoverable sync functionality with eye-catching animations
+
 ## [1.6.0] - 2025-09-25
 
 ### Added
